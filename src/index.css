@@ -243,3 +243,144 @@ input:focus, textarea:focus, select:focus {
 .empty-state { text-align: center; padding: 4rem 1rem; color: var(--muted); }
 .empty-state p { font-size: 1rem; margin-top: .5rem; }
 .divider { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+
+/* ── Home hero ────────────────────────────────────────────── */
+.home-hero {
+  text-align: center; padding: 3rem 1rem 2rem;
+  background: linear-gradient(135deg, rgba(124,58,237,.12) 0%, transparent 60%);
+  border-radius: var(--radius); margin-bottom: 1.75rem;
+}
+.home-hero h1 { font-size: clamp(1.6rem, 4vw, 2.5rem); font-weight: 800; margin-bottom: .5rem; }
+.home-hero p  { color: var(--muted); margin-bottom: 1.5rem; }
+.home-search  { max-width: 520px; margin: 0 auto; }
+.home-search input { font-size: 1rem; padding: .8rem 1.1rem; }
+
+/* ── Category pills ───────────────────────────────────────── */
+.category-pills { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.category-pill {
+  padding: .4rem 1rem; border-radius: 999px; font-size: .85rem; font-weight: 600;
+  border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer;
+  transition: all .18s;
+}
+.category-pill:hover { border-color: var(--accent2); color: var(--accent2); }
+.category-pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ── Category badges ──────────────────────────────────────── */
+.category-badge {
+  display: inline-block; padding: .2rem .6rem; border-radius: 999px;
+  font-size: .72rem; font-weight: 600; text-transform: capitalize;
+  background: rgba(167,139,250,.15); border: 1px solid rgba(167,139,250,.3); color: var(--accent2);
+}
+
+/* ── Filters bar ──────────────────────────────────────────── */
+.filters-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;
+}
+.filters-bar input, .filters-bar select { width: auto; font-size: .85rem; padding: .45rem .75rem; }
+
+/* ── Ticket card wrapper (for fav button overlay) ─────────── */
+.ticket-card-wrapper { position: relative; }
+.ticket-card-fav { position: absolute; bottom: 56px; right: 8px; }
+.ticket-card-category { position: absolute; bottom: .6rem; left: .6rem; }
+.ticket-card-cat-label { font-size: .75rem; color: var(--accent2); text-transform: capitalize; font-weight: 500; }
+
+/* ── Favorite button ──────────────────────────────────────── */
+.fav-btn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  background: rgba(15,15,19,.7); backdrop-filter: blur(4px);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: .3rem .65rem; font-size: .85rem; cursor: pointer;
+  transition: transform .15s, background .15s;
+}
+.fav-btn:hover { transform: scale(1.1); background: rgba(30,30,40,.9); }
+.fav-btn--liked { border-color: rgba(239,68,68,.4); }
+.fav-btn:disabled { pointer-events: none; }
+.fav-count { font-size: .75rem; color: var(--muted); font-weight: 600; }
+
+/* ── Image gallery (detail) ───────────────────────────────── */
+.image-thumbs { display: flex; gap: .5rem; margin-top: .5rem; flex-wrap: wrap; }
+.image-thumb {
+  width: 64px; height: 64px; border-radius: 8px; overflow: hidden;
+  border: 2px solid transparent; cursor: pointer; padding: 0; background: var(--surface2);
+  transition: border-color .15s;
+}
+.image-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.image-thumb.active { border-color: var(--accent2); }
+
+/* ── Image upload grid ────────────────────────────────────── */
+.image-preview-grid { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.image-preview-thumb {
+  position: relative; width: 90px; height: 90px; border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--border);
+}
+.image-preview-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.thumb-cover {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(124,58,237,.8); color: #fff; font-size: .65rem; font-weight: 700;
+  text-align: center; padding: .15rem;
+}
+.thumb-remove {
+  position: absolute; top: 3px; right: 3px;
+  background: rgba(0,0,0,.65); color: #fff; border: none; border-radius: 50%;
+  width: 20px; height: 20px; font-size: .7rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.file-upload-area {
+  display: flex; align-items: center; justify-content: center;
+  border: 2px dashed var(--border); border-radius: 10px; padding: 1.5rem;
+  cursor: pointer; color: var(--muted); font-size: .9rem;
+  transition: border-color .2s, color .2s;
+}
+.file-upload-area:hover { border-color: var(--accent2); color: var(--accent2); }
+
+/* ── Chat ─────────────────────────────────────────────────── */
+.chat-box {
+  background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 1rem; min-height: 160px; max-height: 340px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: .65rem;
+}
+.chat-msg { display: flex; flex-direction: column; max-width: 80%; }
+.chat-msg--me { align-self: flex-end; align-items: flex-end; }
+.chat-sender { font-size: .72rem; color: var(--muted); margin-bottom: .2rem; }
+.chat-bubble {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: .55rem .85rem; font-size: .9rem; line-height: 1.5;
+}
+.chat-msg--me .chat-bubble { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chat-time { font-size: .68rem; color: var(--muted); margin-top: .2rem; }
+
+/* ── Navbar dropdown ──────────────────────────────────────── */
+.nav-menu-wrap { position: relative; }
+.nav-avatar-btn { background: none; border: none; padding: 0; cursor: pointer; }
+.nav-avatar {
+  width: 36px; height: 36px; border-radius: 50%; background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: #fff; font-size: .95rem;
+}
+.nav-dropdown {
+  position: absolute; right: 0; top: calc(100% + .5rem);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  min-width: 180px; z-index: 200; box-shadow: var(--shadow);
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.nav-dropdown-item {
+  display: block; width: 100%; padding: .7rem 1rem; font-size: .9rem; text-align: left;
+  background: none; border: none; color: var(--text); cursor: pointer; transition: background .15s;
+  text-decoration: none;
+}
+.nav-dropdown-item:hover { background: var(--surface2); }
+.nav-dropdown-item--danger { color: var(--danger); }
+
+/* ── Avatar ───────────────────────────────────────────────── */
+.avatar-lg {
+  width: 72px; height: 72px; border-radius: 50%; background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: #fff; font-size: 1.6rem; flex-shrink: 0;
+  background-size: cover; background-position: center;
+}
+.avatar-md {
+  width: 52px; height: 52px; border-radius: 50%; background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: #fff; font-size: 1.15rem; flex-shrink: 0;
+  background-size: cover; background-position: center;
+}
