@@ -157,13 +157,47 @@ input:focus, textarea:focus, select:focus {
   min-height: calc(100vh - 65px); padding: 2rem 1rem;
 }
 .auth-card { width: 100%; max-width: 420px; }
-.auth-tabs { display: flex; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); }
+
+.auth-logo {
+  font-size: 1.3rem; font-weight: 800; color: var(--accent2);
+  text-align: center; margin-bottom: 1.5rem; letter-spacing: -.5px;
+}
+
+/* Google button */
+.btn-google {
+  display: flex; align-items: center; justify-content: center; gap: .65rem;
+  width: 100%; padding: .65rem 1rem;
+  background: #fff; color: #3c4043;
+  border: 1px solid #dadce0; border-radius: 8px;
+  font-size: .93rem; font-weight: 600; cursor: pointer;
+  transition: background .15s, box-shadow .15s;
+}
+.btn-google:hover { background: #f8f8f8; box-shadow: 0 1px 6px rgba(0,0,0,.15); }
+.btn-google:disabled { opacity: .5; pointer-events: none; }
+
+.auth-divider {
+  display: flex; align-items: center; gap: .75rem;
+  color: var(--muted); font-size: .8rem; margin: 1.1rem 0;
+}
+.auth-divider::before, .auth-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+
+.auth-tabs { display: flex; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
 .auth-tab {
-  flex: 1; padding: .7rem; background: none; border: none; color: var(--muted);
-  font-size: .95rem; font-weight: 600; transition: color .2s;
-  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  flex: 1; padding: .65rem; background: none; border: none; color: var(--muted);
+  font-size: .93rem; font-weight: 600; transition: color .2s;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer;
 }
 .auth-tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
+
+/* Spinner */
+.spinner {
+  width: 32px; height: 32px; border: 3px solid var(--border);
+  border-top-color: var(--accent2); border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── Ticket Detail ────────────────────────────────────────── */
 .ticket-detail { display: grid; grid-template-columns: 1fr 380px; gap: 2rem; align-items: start; }
