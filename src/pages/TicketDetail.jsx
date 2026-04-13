@@ -1,13 +1,15 @@
 import { useEffect, useState, useRef } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import FavoriteButton from '../components/FavoriteButton'
+import CheckoutModal from '../components/CheckoutModal'
 
 const CATEGORY_EMOJI = { concerts: '🎵', sports: '⚽', travel: '✈️', events: '🎉', experiences: '🌟' }
 
 export default function TicketDetail() {
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
   const { user } = useAuth()
   const navigate = useNavigate()
   const chatEndRef = useRef(null)
@@ -18,13 +20,23 @@ export default function TicketDetail() {
   const [messages, setMessages] = useState([])
   const [imgIdx, setImgIdx]     = useState(0)
   const [loading, setLoading]   = useState(true)
-  const [offerModal, setOfferModal] = useState(false)
-  const [offerPrice, setOfferPrice] = useState('')
+  const [offerModal, setOfferModal]     = useState(false)
+  const [checkoutModal, setCheckoutModal] = useState(false)
+  const [offerPrice, setOfferPrice]     = useState('')
   const [chatMsg, setChatMsg]   = useState('')
   const [actionLoading, setActionLoading] = useState(false)
   const [chatLoading, setChatLoading]     = useState(false)
+  const [fileUrl, setFileUrl]   = useState(null)
+  const [fileLoading, setFileLoading] = useState(false)
   const [msg, setMsg]   = useState('')
   const [error, setError] = useState('')
+
+  // Show success message if redirected back from Stripe
+  useEffect(() => {
+    if (searchParams.get('payment') === 'success') {
+      setMsg('Payment authorized! Your order is pending review. We'll notify you once approved.')
+    }
+  }, [searchParams])
 
   useEffect(() => {
     async function load() {
@@ -32,7 +44,9 @@ export default function TicketDetail() {
       if (!t) { navigate('/'); return }
       setTicket(t)
 
-      const { data: s } = await supabase.from('profiles').select('first_name, last_name, name, email, avatar_url').eq('id', t.seller_id).single()
+      const { data: s } = await supabase.from('profiles')
+        .select('first_name, last_name, name, email, avatar_url, stripe_account_id')
+        .eq('id', t.seller_id).single()
       setSeller(s)
 
       if (user) {
@@ -50,23 +64,11 @@ export default function TicketDetail() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  const isOwner = user && ticket && user.id === ticket.seller_id
-  const isBuyer = user && ticket && user.id !== ticket.seller_id
-  const canAct  = ticket && ticket.status === 'active'
-  const images  = ticket?.image_urls?.length ? ticket.image_urls : (ticket?.image_url ? [ticket.image_url] : [])
-
-  async function handleBuyNow() {
-    setActionLoading(true); setError('')
-    const { error } = await supabase.from('orders').insert({
-      ticket_id: ticket.id, buyer_id: user.id, seller_id: ticket.seller_id,
-      price: ticket.price, status: 'pending',
-    })
-    if (error) { setError(error.message); setActionLoading(false); return }
-    await supabase.from('tickets').update({ status: 'pending' }).eq('id', ticket.id)
-    setTicket(t => ({ ...t, status: 'pending' }))
-    setMsg('Order created! Go to your dashboard to complete the purchase.')
-    setActionLoading(false)
-  }
+  const isOwner  = user && ticket && user.id === ticket.seller_id
+  const isBuyer  = user && ticket && user.id !== ticket.seller_id
+  const canAct   = ticket && ticket.status === 'active'
+  const images   = ticket?.image_urls?.length ? ticket.image_urls : (ticket?.image_url ? [ticket.image_url] : [])
+  const sellerHasStripe = !!seller?.stripe_account_id
 
   async function handleMakeOffer(e) {
     e.preventDefault(); setActionLoading(true); setError('')
@@ -85,18 +87,32 @@ export default function TicketDetail() {
     await supabase.from('offers').update({ status: 'rejected' }).eq('ticket_id', ticket.id).neq('id', offer.id)
     await supabase.from('orders').insert({
       ticket_id: ticket.id, buyer_id: offer.buyer_id, seller_id: user.id,
-      price: offer.offer_price, status: 'pending',
+      price: offer.offer_price, status: 'pending_review',
     })
     await supabase.from('tickets').update({ status: 'pending' }).eq('id', ticket.id)
     setTicket(t => ({ ...t, status: 'pending' }))
     setOffers(os => os.map(o => o.id === offer.id ? { ...o, status: 'accepted' } : { ...o, status: 'rejected' }))
-    setMsg('Offer accepted. An order has been created.')
+    setMsg('Offer accepted. The buyer has been notified.')
     setActionLoading(false)
   }
 
   async function handleRejectOffer(offer) {
     await supabase.from('offers').update({ status: 'rejected' }).eq('id', offer.id)
     setOffers(os => os.map(o => o.id === offer.id ? { ...o, status: 'rejected' } : o))
+  }
+
+  async function handleViewFile() {
+    if (fileUrl) { window.open(fileUrl, '_blank'); return }
+    setFileLoading(true)
+    const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch(`/api/ticket-file?ticket_id=${ticket.id}`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+    const data = await res.json()
+    if (!res.ok) { setError(data.error); setFileLoading(false); return }
+    setFileUrl(data.url)
+    window.open(data.url, '_blank')
+    setFileLoading(false)
   }
 
   async function handleSendMessage(e) {
@@ -118,6 +134,12 @@ export default function TicketDetail() {
   async function handleDelete() {
     await supabase.from('tickets').delete().eq('id', ticket.id)
     navigate('/dashboard')
+  }
+
+  function handleCheckoutSuccess(orderId) {
+    setCheckoutModal(false)
+    setTicket(t => ({ ...t, status: 'pending' }))
+    setMsg('Payment authorized! Your order is pending review. We'll notify you once approved.')
   }
 
   if (loading) return <div className="page-loading">Loading…</div>
@@ -145,9 +167,7 @@ export default function TicketDetail() {
           {/* Image gallery */}
           {images.length > 0 ? (
             <div>
-              <div className="ticket-detail-image">
-                <img src={images[imgIdx]} alt={ticket.title} />
-              </div>
+              <div className="ticket-detail-image"><img src={images[imgIdx]} alt={ticket.title} /></div>
               {images.length > 1 && (
                 <div className="image-thumbs">
                   {images.map((url, i) => (
@@ -173,12 +193,14 @@ export default function TicketDetail() {
           {/* Offers (seller only) */}
           {isOwner && offers.length > 0 && (
             <div style={{ marginTop: '1.5rem' }}>
-              <h3 style={{ fontWeight: 600, marginBottom: '.75rem' }}>Offers received ({offers.filter(o => o.status === 'pending').length} pending)</h3>
+              <h3 style={{ fontWeight: 600, marginBottom: '.75rem' }}>
+                Offers received ({offers.filter(o => o.status === 'pending').length} pending)
+              </h3>
               <div className="offers-list">
                 {offers.map(o => (
                   <div key={o.id} className="offer-row">
                     <div>
-                      <span style={{ fontWeight: 700, color: 'var(--accent2)' }}>${Number(o.offer_price).toFixed(2)}</span>
+                      <span style={{ fontWeight: 700, color: 'var(--accent2)' }}>€{Number(o.offer_price).toFixed(2)}</span>
                       <span style={{ fontSize: '.8rem', color: 'var(--muted)', marginLeft: '.5rem' }}>{o.status}</span>
                     </div>
                     {o.status === 'pending' && canAct && (
@@ -221,10 +243,7 @@ export default function TicketDetail() {
               </div>
               {(isBuyer || (isOwner && messages.length > 0)) && (
                 <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '.5rem', marginTop: '.5rem' }}>
-                  <input
-                    value={chatMsg} onChange={e => setChatMsg(e.target.value)}
-                    placeholder="Type a message…" style={{ flex: 1 }}
-                  />
+                  <input value={chatMsg} onChange={e => setChatMsg(e.target.value)} placeholder="Type a message…" style={{ flex: 1 }} />
                   <button type="submit" className="btn btn-primary" disabled={chatLoading || !chatMsg.trim()}>Send</button>
                 </form>
               )}
@@ -237,7 +256,7 @@ export default function TicketDetail() {
           <div className="card" style={{ position: 'sticky', top: 80 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '.75rem' }}>
               <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span className={`ticket-badge ticket-badge--${ticket.status}`} style={{ position: 'static' }}>{ticket.status}</span>
+                <span className={`ticket-badge ticket-badge--${ticket.status}`} style={{ position: 'static' }}>{ticket.status.replace('_', ' ')}</span>
                 {ticket.category && (
                   <span className={`category-badge category-badge--${ticket.category}`}>
                     {CATEGORY_EMOJI[ticket.category]} {ticket.category}
@@ -252,15 +271,22 @@ export default function TicketDetail() {
             <div className="ticket-detail-meta">
               {formattedDate && <span>📅 {formattedDate}{formattedTime && formattedTime !== '12:00 AM' ? ` · ${formattedTime}` : ''}</span>}
               {ticket.location && <span>📍 {ticket.location}</span>}
-              <span>👤 <Link to={`/seller/${ticket.seller_id}`} style={{ color: 'var(--accent2)' }}>{sellerName}</Link></span>
+              <span>👤 {sellerName}</span>
             </div>
 
-            <div className="ticket-detail-price">${Number(ticket.price).toFixed(2)}</div>
+            <div className="ticket-detail-price">€{Number(ticket.price).toFixed(2)}</div>
 
             <div className="ticket-actions">
-              {ticket.file_url && (
-                <a href={ticket.file_url} target="_blank" rel="noopener noreferrer" className="btn btn-outline">📄 View ticket file</a>
-              )}
+              {/* Ticket file — secured */}
+              {ticket.file_url && (isOwner ? (
+                <a href={ticket.file_url} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
+                  📄 View ticket file
+                </a>
+              ) : (
+                <button className="btn btn-outline" onClick={handleViewFile} disabled={fileLoading}>
+                  {fileLoading ? 'Loading…' : '📄 View ticket file'}
+                </button>
+              ))}
 
               {isOwner ? (
                 <>
@@ -268,12 +294,20 @@ export default function TicketDetail() {
                   <button className="btn btn-danger" onClick={handleDelete}>Delete listing</button>
                 </>
               ) : isBuyer && canAct ? (
-                <>
-                  <button className="btn btn-primary btn-lg" onClick={handleBuyNow} disabled={actionLoading}>
-                    {actionLoading ? 'Processing…' : `Buy now — $${Number(ticket.price).toFixed(2)}`}
-                  </button>
-                  <button className="btn btn-outline" onClick={() => setOfferModal(true)} disabled={actionLoading}>Make offer</button>
-                </>
+                sellerHasStripe ? (
+                  <>
+                    <button className="btn btn-primary btn-lg" onClick={() => setCheckoutModal(true)}>
+                      Buy now · €{Number(ticket.price).toFixed(2)}
+                    </button>
+                    <button className="btn btn-outline" onClick={() => setOfferModal(true)}>
+                      Make offer
+                    </button>
+                  </>
+                ) : (
+                  <div className="alert alert-error" style={{ marginBottom: 0, textAlign: 'center' }}>
+                    Seller hasn't set up payouts yet.
+                  </div>
+                )
               ) : !user ? (
                 <Link to="/login" className="btn btn-primary btn-lg">Log in to buy</Link>
               ) : ticket.status !== 'active' ? (
@@ -292,11 +326,11 @@ export default function TicketDetail() {
           <div className="modal">
             <h2>Make an offer</h2>
             <p style={{ color: 'var(--muted)', fontSize: '.9rem', marginBottom: '1rem' }}>
-              Listed price: <strong style={{ color: 'var(--text)' }}>${Number(ticket.price).toFixed(2)}</strong>
+              Listed price: <strong style={{ color: 'var(--text)' }}>€{Number(ticket.price).toFixed(2)}</strong>
             </p>
             <form onSubmit={handleMakeOffer}>
               <div className="form-group">
-                <label>Your offer (USD)</label>
+                <label>Your offer (EUR)</label>
                 <input type="number" min="0.01" step="0.01" value={offerPrice} onChange={e => setOfferPrice(e.target.value)} required autoFocus />
               </div>
               <div style={{ display: 'flex', gap: '.75rem', marginTop: '.5rem' }}>
@@ -308,6 +342,11 @@ export default function TicketDetail() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Stripe checkout modal */}
+      {checkoutModal && (
+        <CheckoutModal ticket={ticket} onClose={() => setCheckoutModal(false)} onSuccess={handleCheckoutSuccess} />
       )}
     </div>
   )

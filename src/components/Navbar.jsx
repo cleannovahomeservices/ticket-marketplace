@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -7,6 +7,13 @@ export default function Navbar() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+
+  useEffect(() => {
+    if (!user) { setIsAdmin(false); return }
+    supabase.from('profiles').select('is_admin').eq('id', user.id).single()
+      .then(({ data }) => setIsAdmin(!!data?.is_admin))
+  }, [user])
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -32,6 +39,7 @@ export default function Navbar() {
                   <Link to="/favorites" className="nav-dropdown-item" onClick={() => setMenuOpen(false)}>❤️ Favorites</Link>
                   <Link to="/alerts" className="nav-dropdown-item" onClick={() => setMenuOpen(false)}>🔔 Alerts</Link>
                   <Link to="/profile" className="nav-dropdown-item" onClick={() => setMenuOpen(false)}>👤 Profile</Link>
+                  {isAdmin && <Link to="/admin" className="nav-dropdown-item" onClick={() => setMenuOpen(false)}>🛡 Admin</Link>}
                   <hr style={{ margin: '.25rem 0', border: 'none', borderTop: '1px solid var(--border)' }} />
                   <button className="nav-dropdown-item nav-dropdown-item--danger" onClick={handleLogout}>Log out</button>
                 </div>

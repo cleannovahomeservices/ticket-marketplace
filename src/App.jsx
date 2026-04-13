@@ -15,6 +15,8 @@ import Dashboard      from './pages/Dashboard'
 import Profile        from './pages/Profile'
 import Favorites      from './pages/Favorites'
 import Alerts         from './pages/Alerts'
+import Admin          from './pages/Admin'
+import Reauth         from './pages/Reauth'
 
 export default function App() {
   return (
@@ -35,6 +37,8 @@ export default function App() {
           <Route path="/profile"         element={<ProtectedRoute><Profile /></ProtectedRoute>} />
           <Route path="/favorites"       element={<ProtectedRoute><Favorites /></ProtectedRoute>} />
           <Route path="/alerts"          element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
+          <Route path="/admin"           element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+          <Route path="/reauth"          element={<ProtectedRoute><Reauth /></ProtectedRoute>} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

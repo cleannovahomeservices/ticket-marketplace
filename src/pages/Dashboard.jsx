@@ -11,7 +11,9 @@ export default function Dashboard() {
   const [myOrders, setMyOrders]   = useState([])
   const [profile, setProfile]     = useState(null)
   const [loading, setLoading]     = useState(true)
-  const [actionLoading, setActionLoading] = useState(false)
+  const [connectLoading, setConnectLoading] = useState(false)
+  const [connectMsg, setConnectMsg] = useState('')
+  const [connectErr, setConnectErr] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -33,12 +35,17 @@ export default function Dashboard() {
     setMyTickets(ts => ts.filter(t => t.id !== ticketId))
   }
 
-  async function handleCompleteOrder(order) {
-    setActionLoading(true)
-    await supabase.from('orders').update({ status: 'completed' }).eq('id', order.id)
-    await supabase.from('tickets').update({ status: 'completed' }).eq('id', order.ticket_id)
-    setMyOrders(os => os.map(o => o.id === order.id ? { ...o, status: 'completed' } : o))
-    setActionLoading(false)
+  async function handleConnectStripe() {
+    setConnectLoading(true)
+    setConnectErr('')
+    const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch('/api/stripe-connect', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+    const data = await res.json()
+    if (!res.ok) { setConnectErr(data.error || 'Failed to connect'); setConnectLoading(false); return }
+    window.location.href = data.url
   }
 
   if (loading) return <div className="page-loading">Loading…</div>
@@ -53,6 +60,9 @@ export default function Dashboard() {
 
   return (
     <div className="page">
+      {connectMsg && <div className="alert alert-success" style={{ marginBottom: '1rem' }}>{connectMsg}</div>}
+      {connectErr && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{connectErr}</div>}
+
       {/* Profile header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
         <div className="avatar-md" style={{ backgroundImage: profile?.avatar_url ? `url(${profile.avatar_url})` : 'none' }}>
@@ -63,6 +73,16 @@ export default function Dashboard() {
           <div style={{ color: 'var(--muted)', fontSize: '.88rem' }}>{user.email}</div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+          {!profile?.stripe_account_id && (
+            <button className="btn btn-connect btn-sm" onClick={handleConnectStripe} disabled={connectLoading}>
+              {connectLoading ? 'Redirecting…' : '💳 Connect payout account'}
+            </button>
+          )}
+          {profile?.stripe_account_id && (
+            <button className="btn btn-outline btn-sm" onClick={handleConnectStripe} disabled={connectLoading}>
+              {connectLoading ? 'Redirecting…' : '💳 Manage payouts'}
+            </button>
+          )}
           <Link to="/profile" className="btn btn-outline btn-sm">Edit profile</Link>
           <Link to="/create" className="btn btn-primary btn-sm">+ Sell ticket</Link>
         </div>
@@ -123,13 +143,11 @@ export default function Dashboard() {
                     <p>Ordered {new Date(order.created_at).toLocaleDateString()} · <strong>{order.status}</strong></p>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
-                    <span className="order-price">${Number(order.price).toFixed(2)}</span>
-                    {order.status === 'pending' && (
-                      <button className="btn btn-success btn-sm" onClick={() => handleCompleteOrder(order)} disabled={actionLoading}>
-                        Complete purchase
-                      </button>
-                    )}
-                    {order.status === 'completed' && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Done</span>}
+                    <span className="order-price">€{Number(order.price).toFixed(2)}</span>
+                    {order.status === 'pending_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Pending review</span>}
+                    {order.status === 'completed' && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Completed</span>}
+                    {order.status === 'rejected' && <span style={{ color: 'var(--danger)', fontWeight: 600, fontSize: '.85rem' }}>✗ Rejected</span>}
+                    {order.status === 'failed' && <span style={{ color: 'var(--muted)', fontWeight: 600, fontSize: '.85rem' }}>Failed</span>}
                     <Link to={`/ticket/${order.ticket_id}`} className="btn btn-ghost btn-sm">View</Link>
                   </div>
                 </div>
