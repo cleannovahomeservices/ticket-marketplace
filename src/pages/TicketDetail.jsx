@@ -139,7 +139,7 @@ export default function TicketDetail() {
   function handleCheckoutSuccess(orderId) {
     setCheckoutModal(false)
     setTicket(t => ({ ...t, status: 'pending' }))
-    setMsg('Payment authorized! Your order is pending review. We'll notify you once approved.')
+    setMsg("Payment authorized! Your order is pending review. We'll notify you once approved.")
   }
 
   if (loading) return <div className="page-loading">Loading…</div>
