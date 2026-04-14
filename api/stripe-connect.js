@@ -4,7 +4,7 @@ const BASE_URL = 'https://ticket-marketplace-lyart.vercel.app'
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS); res.end(); return }
-  if (req.method !== 'POST') { json(res, 405, { error: 'Method not allowed' }); return }
+  if (req.method !== 'POST' && req.method !== 'GET') { json(res, 405, { error: 'Method not allowed' }); return }
 
   const user = await getAuthUser(req)
   if (!user) { json(res, 401, { error: 'Unauthorized' }); return }
