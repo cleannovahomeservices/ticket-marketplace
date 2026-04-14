@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
-import { stripePromise } from '../lib/stripe'
+import stripePromise from '../lib/stripe'
 import { supabase } from '../lib/supabase'
 
 // ── Inner form (inside <Elements>) ────────────────────────────
