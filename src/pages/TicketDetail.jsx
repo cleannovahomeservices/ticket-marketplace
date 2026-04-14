@@ -34,7 +34,7 @@ export default function TicketDetail() {
   // Show success message if redirected back from Stripe
   useEffect(() => {
     if (searchParams.get('payment') === 'success') {
-      setMsg('Payment authorized! Your order is pending review. We'll notify you once approved.')
+      setMsg("Payment authorized! Your order is pending review. We'll notify you once approved.")
     }
   }, [searchParams])
 
