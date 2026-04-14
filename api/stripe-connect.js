@@ -1,4 +1,11 @@
-import { stripe, getSupabaseAdmin, getAuthUser, parseBody, json, CORS } from './_utils.js'
+import Stripe from 'stripe';
+import { getSupabaseAdmin, getAuthUser, parseBody, json, CORS } from './_utils.js'
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2024-06-20',
+});
+
+console.log("Stripe key exists:", !!process.env.STRIPE_SECRET_KEY);
 
 const BASE_URL = 'https://ticket-marketplace-lyart.vercel.app'
 
