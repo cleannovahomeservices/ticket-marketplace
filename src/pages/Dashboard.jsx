@@ -35,18 +35,25 @@ export default function Dashboard() {
     setMyTickets(ts => ts.filter(t => t.id !== ticketId))
   }
 
-  async function handleConnectStripe() {
-    setConnectLoading(true)
-    setConnectErr('')
-    const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch('/api/stripe-connect', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    })
-    const data = await res.json()
-    if (!res.ok) { setConnectErr(data.error || 'Failed to connect'); setConnectLoading(false); return }
-    window.location.href = data.url
-  }
+  const handleConnectStripe = async () => {
+    console.log('Connecting to Stripe…')
+    try {
+      const res = await fetch('/api/stripe-connect', {
+        method: 'POST'
+      });
+
+      const data = await res.json();
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error('No URL returned from Stripe');
+      }
+
+    } catch (err) {
+      console.error('Stripe connect error:', err);
+    }
+  };
 
   if (loading) return <div className="page-loading">Loading…</div>
 
