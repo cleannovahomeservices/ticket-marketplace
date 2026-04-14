@@ -89,7 +89,7 @@ export default function Alerts() {
             <div key={alert.id} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.75rem', padding: '1rem 1.25rem' }}>
               <div>
                 {alert.keyword && <span style={{ fontWeight: 600 }}>"{alert.keyword}"</span>}
-                {alert.category && <span className="category-badge category-badge--{alert.category}" style={{ marginLeft: alert.keyword ? '.5rem' : 0 }}>{alert.category}</span>}
+                {alert.category && <span className={`category-badge category-badge--${alert.category}`} style={{ marginLeft: alert.keyword ? '.5rem' : 0 }}>{alert.category}</span>}
                 {alert.max_price && <span style={{ color: 'var(--muted)', fontSize: '.85rem', marginLeft: '.5rem' }}>· max ${alert.max_price}</span>}
                 {!alert.keyword && !alert.category && <span style={{ color: 'var(--muted)' }}>All tickets</span>}
               </div>

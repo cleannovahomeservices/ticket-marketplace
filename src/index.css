@@ -83,6 +83,7 @@ input:focus, textarea:focus, select:focus {
 .btn-success  { background: var(--success); color: #fff; }
 .btn-ghost    { background: transparent; color: var(--muted); }
 .btn-ghost:hover { color: var(--text); }
+.btn-connect  { background: #635bff; color: #fff; }
 .btn-sm { padding: .4rem .9rem; font-size: .83rem; }
 .btn-lg { padding: .75rem 1.75rem; font-size: 1rem; }
 .btn:disabled { opacity: .45; pointer-events: none; }
