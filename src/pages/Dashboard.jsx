@@ -36,10 +36,22 @@ export default function Dashboard() {
   }
 
   const handleConnectStripe = async () => {
-    console.log('Connecting to Stripe…')
+    setConnectLoading(true)
+    setConnectErr('')
     try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        setConnectErr('You must be logged in to connect Stripe.')
+        setConnectLoading(false)
+        return
+      }
+
       const res = await fetch('/api/stripe-connect', {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
 
       const data = await res.json();
@@ -47,11 +59,13 @@ export default function Dashboard() {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        console.error('No URL returned from Stripe');
+        setConnectErr(data.error || 'Failed to get Stripe onboarding URL.')
+        setConnectLoading(false)
       }
-
     } catch (err) {
       console.error('Stripe connect error:', err);
+      setConnectErr('Network error connecting to Stripe.')
+      setConnectLoading(false)
     }
   };
 
