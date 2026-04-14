@@ -22,12 +22,19 @@ export default async function handler(req, res) {
 
   switch (event.type) {
     case 'payment_intent.succeeded': {
-      // Payment was authorized (manual capture). Keep status = pending_review.
+      // Payment was authorized (manual capture). Mark ticket as pending_review.
       const pi = event.data.object
       const { data: order } = await supabase
-        .from('orders').select('id, status').eq('stripe_payment_intent_id', pi.id).single()
-      if (order && order.status !== 'pending_review') {
-        await supabase.from('orders').update({ status: 'pending_review' }).eq('id', order.id)
+        .from('orders').select('id, status, ticket_id').eq('stripe_payment_intent_id', pi.id).single()
+      if (order) {
+        if (order.status !== 'pending_review') {
+          await supabase.from('orders').update({ status: 'pending_review' }).eq('id', order.id)
+        }
+        // Only transition the ticket if it's still in the reservation state
+        await supabase.from('tickets')
+          .update({ status: 'pending_review' })
+          .eq('id', order.ticket_id)
+          .in('status', ['pending', 'active'])
       }
       break
     }

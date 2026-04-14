@@ -1,4 +1,4 @@
-import { stripe, getSupabaseAdmin, getAuthUser, parseBody, json, CORS } from './_utils.js'
+import { stripe, getSupabaseAdmin, getAuthUser, parseBody, json, CORS, sendAdminEmail } from './_utils.js'
 
 export default async function handler(req, res) {
   // OPTIONS preflight
@@ -67,6 +67,23 @@ export default async function handler(req, res) {
 
   // Mark ticket as pending
   await supabase.from('tickets').update({ status: 'pending' }).eq('id', ticket_id)
+
+  // Notify admin (fire-and-forget — don't block response)
+  sendAdminEmail(
+    `New payment pending review — €${Number(ticket.price).toFixed(2)}`,
+    `
+      <h2>New payment authorized</h2>
+      <p>A buyer has just authorized a payment that is waiting for your review.</p>
+      <ul>
+        <li><strong>Ticket:</strong> ${ticket.title}</li>
+        <li><strong>Price:</strong> €${Number(ticket.price).toFixed(2)}</li>
+        <li><strong>Order ID:</strong> ${order.id}</li>
+        <li><strong>Payment Intent:</strong> ${paymentIntent.id}</li>
+        <li><strong>Buyer ID:</strong> ${user.id}</li>
+      </ul>
+      <p>Review and approve or reject this order in the admin panel.</p>
+    `
+  ).catch(err => console.error('[email] admin notify failed:', err.message))
 
   json(res, 200, { client_secret: paymentIntent.client_secret, order_id: order.id })
 }

@@ -24,24 +24,21 @@ export default async function handler(req, res) {
   if (!order.stripe_payment_intent_id) { json(res, 400, { error: 'No payment intent on this order' }); return }
 
   try {
-    // Cancel the PaymentIntent — automatically refunds if already confirmed
-    await stripe.paymentIntents.cancel(order.stripe_payment_intent_id)
+    // Try to refund the payment intent (works if already captured)
+    await stripe.refunds.create({ payment_intent: order.stripe_payment_intent_id })
   } catch (err) {
-    // If already captured, refund instead
-    if (err.code === 'payment_intent_unexpected_state') {
-      try {
-        await stripe.refunds.create({ payment_intent: order.stripe_payment_intent_id })
-      } catch (refundErr) {
-        json(res, 500, { error: `Refund failed: ${refundErr.message}` }); return
-      }
-    } else {
-      json(res, 500, { error: `Cancel failed: ${err.message}` }); return
+    // If the PI is still in manual-capture state (not yet captured),
+    // refunds aren't possible — cancel it to release the authorization.
+    try {
+      await stripe.paymentIntents.cancel(order.stripe_payment_intent_id)
+    } catch (cancelErr) {
+      json(res, 500, { error: `Refund failed: ${err.message}; cancel failed: ${cancelErr.message}` }); return
     }
   }
 
-  // Mark order rejected, return ticket to active
+  // Mark order rejected, ticket refunded
   await supabase.from('orders').update({ status: 'rejected' }).eq('id', order_id)
-  await supabase.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id)
+  await supabase.from('tickets').update({ status: 'refunded' }).eq('id', order.ticket_id)
 
   json(res, 200, { success: true })
 }
