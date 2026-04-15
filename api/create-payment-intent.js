@@ -30,8 +30,10 @@ export default async function handler(req, res) {
   if (order.stripe_payment_intent_id) {
     try {
       const pi = await stripe.paymentIntents.retrieve(order.stripe_payment_intent_id)
+      console.log(`[create-pi] ↻ reusing pi=${pi.id} for order=${order.id} status=${pi.status}`)
       json(res, 200, { client_secret: pi.client_secret, order_id: order.id }); return
     } catch (err) {
+      console.error(`[create-pi] retrieve failed for order=${order.id}:`, err.message)
       json(res, 500, { error: err.message }); return
     }
   }
@@ -71,16 +73,21 @@ export default async function handler(req, res) {
         seller_id: order.seller_id,
       },
     })
-  } catch (err) { json(res, 500, { error: err.message }); return }
+  } catch (err) {
+    console.error(`[create-pi] create failed for order=${order.id}:`, err.message)
+    json(res, 500, { error: err.message }); return
+  }
 
   const { error: uErr } = await supabase.from('orders').update({
     stripe_payment_intent_id: pi.id,
     updated_at: new Date().toISOString(),
   }).eq('id', order.id)
   if (uErr) {
+    console.error(`[create-pi] failed to link pi=${pi.id} to order=${order.id}:`, uErr.message)
     await stripe.paymentIntents.cancel(pi.id).catch(() => {})
     json(res, 500, { error: uErr.message }); return
   }
 
+  console.log(`[create-pi] ✓ linked pi=${pi.id} → order=${order.id}  amount=${amountCents}  fee=${platformFee}  seller=${sellerStripeId}`)
   json(res, 200, { client_secret: pi.client_secret, order_id: order.id })
 }
