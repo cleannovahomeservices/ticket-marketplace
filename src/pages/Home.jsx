@@ -14,12 +14,31 @@ export default function Home() {
   const [maxPrice, setMaxPrice] = useState('')
 
   useEffect(() => {
-    supabase
-      .from('tickets')
-      .select('*')
-      .eq('status', 'active')
-      .order('created_at', { ascending: false })
-      .then(({ data }) => { setTickets(data || []); setLoading(false) })
+    let alive = true
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('tickets')
+          .select('*')
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+
+        if (!alive) return
+        if (error) {
+          console.error('[home] tickets load failed:', error.message)
+          setTickets([])
+          return
+        }
+        setTickets(data || [])
+      } catch (err) {
+        console.error('[home] tickets load crashed:', err)
+        if (!alive) return
+        setTickets([])
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false }
   }, [])
 
   const filtered = useMemo(() => {

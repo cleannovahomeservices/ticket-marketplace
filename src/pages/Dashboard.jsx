@@ -17,20 +17,44 @@ export default function Dashboard() {
   const [connectErr, setConnectErr] = useState('')
 
   useEffect(() => {
+    let alive = true
     async function load() {
-      const [{ data: tickets }, { data: orders }, { data: received }, { data: prof }] = await Promise.all([
-        supabase.from('tickets').select('*').eq('seller_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('buyer_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('seller_id', user.id).in('status', ['pending_payment','paid_pending_ticket','pending_admin_review','completed']).order('created_at', { ascending: false }),
-        supabase.from('profiles').select('*').eq('id', user.id).single(),
-      ])
-      setMyTickets(tickets || [])
-      setMyOrders(orders || [])
-      setReceivedOrders(received || [])
-      setProfile(prof)
-      setLoading(false)
+      try {
+        const [
+          { data: tickets, error: ticketsError },
+          { data: orders, error: ordersError },
+          { data: received, error: receivedError },
+          { data: prof, error: profileError }
+        ] = await Promise.all([
+          supabase.from('tickets').select('*').eq('seller_id', user.id).order('created_at', { ascending: false }),
+          supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('buyer_id', user.id).order('created_at', { ascending: false }),
+          supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('seller_id', user.id).in('status', ['pending_payment','paid_pending_ticket','pending_admin_review','completed']).order('created_at', { ascending: false }),
+          supabase.from('profiles').select('*').eq('id', user.id).single(),
+        ])
+        if (!alive) return
+
+        if (ticketsError) console.error('[dashboard] tickets load failed:', ticketsError.message)
+        if (ordersError) console.error('[dashboard] orders load failed:', ordersError.message)
+        if (receivedError) console.error('[dashboard] received load failed:', receivedError.message)
+        if (profileError) console.error('[dashboard] profile load failed:', profileError.message)
+
+        setMyTickets(tickets || [])
+        setMyOrders(orders || [])
+        setReceivedOrders(received || [])
+        setProfile(prof || null)
+      } catch (err) {
+        console.error('[dashboard] load crashed:', err)
+        if (!alive) return
+        setMyTickets([])
+        setMyOrders([])
+        setReceivedOrders([])
+        setProfile(null)
+      } finally {
+        if (alive) setLoading(false)
+      }
     }
     load()
+    return () => { alive = false }
   }, [user.id])
 
   async function handleDeleteTicket(ticketId) {

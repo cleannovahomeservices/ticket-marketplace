@@ -10,20 +10,41 @@ export function AuthProvider({ children }) {
 
   const loadProfile = useCallback(async (authUser) => {
     if (!authUser) { setProfile(null); return }
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, email, first_name, last_name, name, avatar_url, role, is_admin, stripe_account_id')
-      .eq('id', authUser.id).single()
-    setProfile(data || null)
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, email, first_name, last_name, name, avatar_url, role, is_admin, stripe_account_id')
+        .eq('id', authUser.id).single()
+      if (error) {
+        console.error('[auth] profile load failed:', error.message)
+        setProfile(null)
+        return
+      }
+      setProfile(data || null)
+    } catch (err) {
+      console.error('[auth] profile load crashed:', err)
+      setProfile(null)
+    }
   }, [])
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const u = session?.user ?? null
-      setUser(u)
-      await loadProfile(u)
-      setLoading(false)
-    })
+    let alive = true
+    ;(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const u = session?.user ?? null
+        if (!alive) return
+        setUser(u)
+        await loadProfile(u)
+      } catch (err) {
+        console.error('[auth] initial session load failed:', err)
+        if (!alive) return
+        setUser(null)
+        setProfile(null)
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       const u = session?.user ?? null
@@ -41,7 +62,10 @@ export function AuthProvider({ children }) {
       await loadProfile(u)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      alive = false
+      subscription.unsubscribe()
+    }
   }, [loadProfile])
 
   const role = profile?.role || (profile?.is_admin ? 'admin' : 'user')
