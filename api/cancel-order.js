@@ -1,6 +1,7 @@
 import { stripe, getSupabaseAdmin, getAuthUser, parseBody, json, CORS } from './_utils.js'
 
-// Seller-only rejection of an order.
+// Buyer-only cancellation of an order. Sets status to 'rejected'
+// (the allow-list contains no separate 'cancelled' value).
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS); res.end(); return }
   if (req.method !== 'POST') { json(res, 405, { error: 'Method not allowed' }); return }
@@ -15,11 +16,11 @@ export default async function handler(req, res) {
   const { data: order, error: oErr } = await supabase
     .from('orders').select('*').eq('id', order_id).single()
   if (oErr || !order) { json(res, 404, { error: 'Order not found' }); return }
-  if (order.seller_id !== user.id) {
-    json(res, 403, { error: 'Only the seller can reject this order' }); return
+  if (order.buyer_id !== user.id) {
+    json(res, 403, { error: 'Only the buyer can cancel this order' }); return
   }
   if (!['pending', 'accepted'].includes(order.status)) {
-    json(res, 400, { error: `Order is ${order.status}, cannot reject` }); return
+    json(res, 400, { error: `Order is ${order.status}, cannot cancel` }); return
   }
 
   if (order.status === 'accepted' && order.stripe_payment_intent_id) {
@@ -31,7 +32,6 @@ export default async function handler(req, res) {
   }).eq('id', order.id)
   if (upErr) { json(res, 500, { error: upErr.message }); return }
 
-  // Free the ticket if nothing else is active on it.
   const { data: remaining } = await supabase
     .from('orders').select('id').eq('ticket_id', order.ticket_id).in('status', ['pending','accepted','paid'])
   if (!remaining || remaining.length === 0) {
@@ -43,8 +43,8 @@ export default async function handler(req, res) {
       order_id: order.id,
       ticket_id: order.ticket_id,
       sender_id: user.id,
-      receiver_id: order.buyer_id,
-      content: '❌ Seller rejected this offer.',
+      receiver_id: order.seller_id,
+      content: '❌ Buyer canceled this order.',
     })
   }
 

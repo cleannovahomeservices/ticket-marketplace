@@ -9,6 +9,7 @@ export default function Dashboard() {
   const [tab, setTab] = useState('selling')
   const [myTickets, setMyTickets] = useState([])
   const [myOrders, setMyOrders]   = useState([])
+  const [receivedOrders, setReceivedOrders] = useState([])
   const [profile, setProfile]     = useState(null)
   const [loading, setLoading]     = useState(true)
   const [connectLoading, setConnectLoading] = useState(false)
@@ -17,13 +18,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: tickets }, { data: orders }, { data: prof }] = await Promise.all([
+      const [{ data: tickets }, { data: orders }, { data: received }, { data: prof }] = await Promise.all([
         supabase.from('tickets').select('*').eq('seller_id', user.id).order('created_at', { ascending: false }),
         supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('buyer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('seller_id', user.id).in('status', ['pending','accepted','paid']).order('created_at', { ascending: false }),
         supabase.from('profiles').select('*').eq('id', user.id).single(),
       ])
       setMyTickets(tickets || [])
       setMyOrders(orders || [])
+      setReceivedOrders(received || [])
       setProfile(prof)
       setLoading(false)
     }
@@ -112,8 +115,9 @@ export default function Dashboard() {
       {/* Tabs */}
       <div className="dashboard-tabs">
         {[
-          { key: 'selling', label: `My Listings (${myTickets.length})` },
-          { key: 'buying',  label: `My Orders (${myOrders.length})` },
+          { key: 'selling',  label: `My Listings (${myTickets.length})` },
+          { key: 'received', label: `Received (${receivedOrders.length})` },
+          { key: 'buying',   label: `My Orders (${myOrders.length})` },
         ].map(t => (
           <button key={t.key} className={`dashboard-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
             {t.label}
@@ -140,6 +144,40 @@ export default function Dashboard() {
                 </div>
               </div>
             ))}
+          </div>
+        )
+      )}
+
+      {/* Received (seller's incoming orders) */}
+      {tab === 'received' && (
+        receivedOrders.length === 0 ? (
+          <div className="empty-state">
+            <div style={{ fontSize: '3rem' }}>📥</div>
+            <p>No incoming orders yet.</p>
+          </div>
+        ) : (
+          <div className="orders-list">
+            {receivedOrders.map(order => {
+              const cover = order.tickets?.image_urls?.[0] || order.tickets?.image_url || null
+              return (
+                <div key={order.id} className="card order-card">
+                  {cover && <img src={cover} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />}
+                  <div className="order-info" style={{ flex: 1 }}>
+                    <h4>{order.tickets?.title || 'Ticket'}</h4>
+                    <p>
+                      {order.type === 'offer' ? 'Offer' : 'Buy request'} · {new Date(order.created_at).toLocaleDateString()} · <strong>{order.status}</strong>
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
+                    <span className="order-price">€{Number(order.price).toFixed(2)}</span>
+                    {order.status === 'pending' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Needs response</span>}
+                    {order.status === 'accepted' && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Awaiting payment</span>}
+                    {order.status === 'paid' && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Paid</span>}
+                    <Link to={`/ticket/${order.ticket_id}`} className="btn btn-primary btn-sm">Open chat</Link>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )
       )}
