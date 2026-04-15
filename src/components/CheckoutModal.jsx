@@ -14,24 +14,63 @@ function PaymentForm({ ticket, order, onSuccess, onCancel }) {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!stripe || !elements) return
+    if (!stripe || !elements) {
+      console.warn('[checkout] stripe or elements not ready')
+      return
+    }
     setLoading(true)
     setError('')
 
-    const { error: stripeError } = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        return_url: `${window.location.origin}/ticket/${ticket.id}?payment=success`,
-      },
-      redirect: 'if_required',
-    })
+    console.log('[checkout] submitting payment for order', order.id)
 
-    if (stripeError) {
-      setError(stripeError.message)
+    // Validate + submit the PaymentElement before confirming — required
+    // by modern Stripe.js to prevent a hang when the form has issues.
+    const { error: submitError } = await elements.submit()
+    if (submitError) {
+      console.error('[checkout] elements.submit error:', submitError)
+      setError(submitError.message || 'Please check your card details.')
       setLoading(false)
       return
     }
 
+    let result
+    try {
+      result = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/ticket/${ticket.id}?payment=success`,
+        },
+        redirect: 'if_required',
+      })
+    } catch (err) {
+      console.error('[checkout] confirmPayment threw:', err)
+      setError(err.message || 'Payment failed unexpectedly.')
+      setLoading(false)
+      return
+    }
+
+    const { error: stripeError, paymentIntent } = result || {}
+
+    if (stripeError) {
+      console.error('[checkout] stripe error:', stripeError)
+      setError(stripeError.message || 'Payment failed.')
+      setLoading(false)
+      return
+    }
+
+    // Manual-capture flow: success = PI in `requires_capture` state.
+    // `succeeded`/`processing` are also valid (auto-capture fallback).
+    const okStatuses = ['requires_capture', 'succeeded', 'processing']
+    const status = paymentIntent?.status
+    console.log('[checkout] confirmPayment resolved, PI status =', status)
+
+    if (!paymentIntent || !okStatuses.includes(status)) {
+      setError(`Unexpected payment state (${status || 'unknown'}). Refresh and try again.`)
+      setLoading(false)
+      return
+    }
+
+    setLoading(false)
     onSuccess(order.id)
   }
 
@@ -39,8 +78,8 @@ function PaymentForm({ ticket, order, onSuccess, onCancel }) {
   const sellerReceives = +(price - platformFee).toFixed(2)
 
   return (
-    <form onSubmit={handleSubmit}>
-      <div style={{ marginBottom: '1.25rem' }}>
+    <form onSubmit={handleSubmit} className="checkout-form">
+      <div className="checkout-payment-element">
         <PaymentElement options={{ layout: 'tabs' }} />
       </div>
 
@@ -64,8 +103,8 @@ function PaymentForm({ ticket, order, onSuccess, onCancel }) {
       </div>
 
       {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
-      <div style={{ display: 'flex', gap: '.75rem' }}>
-        <button type="submit" className="btn btn-primary btn-lg" disabled={loading || !stripe} style={{ flex: 1 }}>
+      <div className="checkout-actions">
+        <button type="submit" className="btn btn-primary btn-lg checkout-pay-btn" disabled={loading || !stripe}>
           {loading ? 'Processing…' : `Pay €${price.toFixed(2)}`}
         </button>
         <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={loading}>Cancel</button>
@@ -114,14 +153,35 @@ export default function CheckoutModal({ ticket, order, onClose, onSuccess }) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ order_id: order.id }),
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
 
-      if (!res.ok) { setError(data.error || 'Failed to initialize payment.'); setLoading(false); return }
+      if (!res.ok) {
+        console.error('[checkout] create-payment-intent failed:', res.status, data)
+        setError(data.error || `Failed to initialize payment (HTTP ${res.status}).`)
+        setLoading(false)
+        return
+      }
+
+      // Server signals PI is already captured/authorized — skip Stripe
+      // Elements entirely and flip straight to success.
+      if (data.already_paid) {
+        console.log('[checkout] PI already paid, skipping Elements')
+        setSucceeded(true)
+        setLoading(false)
+        onSuccess(order.id)
+        return
+      }
+
+      if (!data.client_secret) {
+        setError('Payment could not be initialized.')
+        setLoading(false)
+        return
+      }
       setClientSecret(data.client_secret)
       setLoading(false)
     }
     fetchIntent()
-  }, [order.id])
+  }, [order.id, onSuccess])
 
   function handleSuccess(oid) {
     setSucceeded(true)
@@ -133,8 +193,8 @@ export default function CheckoutModal({ ticket, order, onClose, onSuccess }) {
     : null
 
   return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && !succeeded && onClose()}>
-      <div className="modal" style={{ maxWidth: 480 }}>
+    <div className="modal-overlay checkout-overlay" onClick={e => e.target === e.currentTarget && !succeeded && onClose()}>
+      <div className="modal checkout-modal" style={{ maxWidth: 480 }}>
 
         {succeeded ? (
           <SuccessView ticket={ticket} onClose={onClose} />

@@ -5,8 +5,10 @@ import { stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS } from './
 // transfer_data to the seller's Connect account) and returns the
 // client_secret so the browser can confirm the card payment.
 //
-// If a PI already exists, we just return its client_secret — this makes
-// the endpoint idempotent when the checkout modal re-opens.
+// If a usable PI already exists, we reuse it. If the prior PI is in a
+// state that can no longer be confirmed (captured, cancelled, succeeded,
+// etc.), we transparently create a fresh one — otherwise the buyer
+// would see "Processing…" forever because stripe.js can't re-confirm.
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS); res.end(); return }
   if (req.method !== 'POST') { json(res, 405, { error: 'Method not allowed' }); return }
@@ -26,15 +28,32 @@ export default async function handler(req, res) {
     json(res, 400, { error: `Order is ${order.status}, cannot pay` }); return
   }
 
-  // Already created → reuse.
+  // PI status that still allows client-side confirmation.
+  const REUSABLE = new Set(['requires_payment_method', 'requires_confirmation', 'requires_action'])
+
+  // Already created → only reuse if it can still be confirmed.
   if (order.stripe_payment_intent_id) {
     try {
-      const pi = await stripe.paymentIntents.retrieve(order.stripe_payment_intent_id)
-      console.log(`[create-pi] ↻ reusing pi=${pi.id} for order=${order.id} status=${pi.status}`)
-      json(res, 200, { client_secret: pi.client_secret, order_id: order.id }); return
+      const existing = await stripe.paymentIntents.retrieve(order.stripe_payment_intent_id)
+      console.log(`[create-pi] existing pi=${existing.id} status=${existing.status}`)
+
+      if (REUSABLE.has(existing.status)) {
+        console.log(`[create-pi] ↻ reusing pi=${existing.id} for order=${order.id}`)
+        json(res, 200, { client_secret: existing.client_secret, order_id: order.id }); return
+      }
+
+      // Already paid (manual-capture authorized OR fully captured) —
+      // client should jump straight to success without re-confirming.
+      if (['requires_capture', 'succeeded', 'processing'].includes(existing.status)) {
+        console.log(`[create-pi] pi=${existing.id} already authorized/captured, signaling already_paid`)
+        json(res, 200, { already_paid: true, order_id: order.id, pi_status: existing.status }); return
+      }
+
+      // Cancelled or in a terminal dead state → mint a new one below.
+      console.log(`[create-pi] pi=${existing.id} is ${existing.status}, creating a replacement`)
     } catch (err) {
       console.error(`[create-pi] retrieve failed for order=${order.id}:`, err.message)
-      json(res, 500, { error: err.message }); return
+      // Fall through to create a new one.
     }
   }
 
@@ -64,6 +83,10 @@ export default async function handler(req, res) {
       currency: 'eur',
       payment_method_types: ['card'],
       capture_method: 'manual',
+      // on_behalf_of makes the charge appear on the connected account's
+      // dashboard and fixes cross-currency/3DS edge cases where
+      // transfer_data alone would silently fail authentication.
+      on_behalf_of: sellerStripeId,
       transfer_data: { destination: sellerStripeId },
       application_fee_amount: platformFee,
       metadata: {
