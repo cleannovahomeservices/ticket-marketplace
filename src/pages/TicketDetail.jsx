@@ -45,10 +45,25 @@ export default function TicketDetail() {
   const activeOrderId = activeOrder?.id || null
 
   useEffect(() => {
-    if (searchParams.get('payment') === 'success') {
-      setMsg('✅ Payment successful. The seller has been notified.')
-    }
-  }, [searchParams])
+    if (searchParams.get('payment') !== 'success') return
+    setMsg('✅ Payment successful. The seller has been notified.')
+    // Reconcile in case the 3DS redirect bypassed the in-modal
+    // confirm-payment call. Needs myOrder to know which order to
+    // confirm; retry once that's loaded.
+    if (!myOrder?.id) return
+    let cancelled = false
+    ;(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (cancelled || !session) return
+      await fetch('/api/confirm-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ order_id: myOrder.id }),
+      }).catch(() => {})
+      if (!cancelled) loadOrders(ticket, user)
+    })()
+    return () => { cancelled = true }
+  }, [searchParams, myOrder?.id, ticket, user, loadOrders])
 
   // ── Load ticket + seller + orders ─────────────────────────────
   const loadOrders = useCallback(async (ticketRow, currentUser) => {

@@ -70,6 +70,28 @@ function PaymentForm({ ticket, order, onSuccess, onCancel }) {
       return
     }
 
+    // Don't rely on the Stripe webhook to transition the order — ping
+    // our server so the DB reflects the payment immediately. The server
+    // re-verifies the PI with Stripe; the client isn't trusted.
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/confirm-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ order_id: order.id }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        console.error('[checkout] confirm-payment failed:', res.status, data)
+        // The webhook may still resolve it — don't block the user, but
+        // warn so support can trace it.
+      } else {
+        console.log('[checkout] confirm-payment ok:', data)
+      }
+    } catch (err) {
+      console.error('[checkout] confirm-payment request errored:', err)
+    }
+
     setLoading(false)
     onSuccess(order.id)
   }
@@ -163,9 +185,15 @@ export default function CheckoutModal({ ticket, order, onClose, onSuccess }) {
       }
 
       // Server signals PI is already captured/authorized — skip Stripe
-      // Elements entirely and flip straight to success.
+      // Elements entirely and flip straight to success. Also reconcile
+      // the order status on the server in case the webhook never fired.
       if (data.already_paid) {
         console.log('[checkout] PI already paid, skipping Elements')
+        await fetch('/api/confirm-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ order_id: order.id }),
+        }).catch(err => console.error('[checkout] reconcile confirm-payment errored:', err))
         setSucceeded(true)
         setLoading(false)
         onSuccess(order.id)
