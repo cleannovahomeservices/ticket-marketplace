@@ -20,28 +20,43 @@ export default async function handler(req, res) {
   const supabase = getSupabaseAdmin()
 
   switch (event.type) {
+    // With capture_method='manual', a successful buyer confirmation fires
+    // `amount_capturable_updated` first (authorization held but not yet
+    // captured). That's the signal the buyer has paid — the seller must
+    // now upload the ticket and the admin must approve before capture.
+    case 'payment_intent.amount_capturable_updated': {
+      const pi = event.data.object
+      const { data: order } = await supabase
+        .from('orders').select('id, ticket_id, buyer_id, seller_id, status')
+        .eq('stripe_payment_intent_id', pi.id).single()
+      if (order && order.status === 'pending_payment') {
+        await supabase.from('orders').update({
+          status: 'paid_pending_ticket', updated_at: new Date().toISOString(),
+        }).eq('id', order.id)
+        await supabase.from('messages').insert({
+          order_id: order.id,
+          ticket_id: order.ticket_id,
+          sender_id: order.seller_id,
+          receiver_id: order.buyer_id,
+          content: '💳 Payment received. Upload the ticket to continue.',
+        }).catch(() => {})
+      }
+      break
+    }
+
+    // Fires when capture completes (admin approved). admin-approve.js
+    // already transitions the row — this is a safety net so the status
+    // never drifts if the DB write failed after capture.
     case 'payment_intent.succeeded': {
       const pi = event.data.object
       const { data: order } = await supabase
-        .from('orders').select('id, status, ticket_id').eq('stripe_payment_intent_id', pi.id).single()
-      if (order) {
+        .from('orders').select('id, ticket_id, status')
+        .eq('stripe_payment_intent_id', pi.id).single()
+      if (order && order.status !== 'completed') {
         await supabase.from('orders').update({
-          status: 'paid', updated_at: new Date().toISOString(),
+          status: 'completed', updated_at: new Date().toISOString(),
         }).eq('id', order.id)
         await supabase.from('tickets').update({ status: 'completed' }).eq('id', order.ticket_id)
-        if (order.id) {
-          const { data: full } = await supabase
-            .from('orders').select('id, ticket_id, buyer_id, seller_id').eq('id', order.id).single()
-          if (full?.id) {
-            await supabase.from('messages').insert({
-              order_id: full.id,
-              ticket_id: full.ticket_id,
-              sender_id: full.seller_id,
-              receiver_id: full.buyer_id,
-              content: '💳 Payment received. The sale is complete.',
-            }).catch(() => {})
-          }
-        }
       }
       break
     }
@@ -52,7 +67,7 @@ export default async function handler(req, res) {
         .from('orders').select('id').eq('stripe_payment_intent_id', pi.id).single()
       if (order) {
         await supabase.from('orders').update({
-          status: 'accepted', updated_at: new Date().toISOString(),
+          status: 'pending_payment', updated_at: new Date().toISOString(),
         }).eq('id', order.id)
       }
       break
@@ -62,7 +77,7 @@ export default async function handler(req, res) {
       const pi = event.data.object
       const { data: order } = await supabase
         .from('orders').select('id, ticket_id, status').eq('stripe_payment_intent_id', pi.id).single()
-      if (order && order.status !== 'paid') {
+      if (order && order.status !== 'completed') {
         await supabase.from('orders').update({
           status: 'rejected', updated_at: new Date().toISOString(),
         }).eq('id', order.id)

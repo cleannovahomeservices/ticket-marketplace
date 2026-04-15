@@ -6,7 +6,7 @@ import FavoriteButton from '../components/FavoriteButton'
 import CheckoutModal from '../components/CheckoutModal'
 
 const CATEGORY_EMOJI = { concerts: '🎵', sports: '⚽', travel: '✈️', events: '🎉', experiences: '🌟' }
-const ACTIVE_STATUSES = ['pending', 'accepted', 'paid']
+const ACTIVE_STATUSES = ['pending_payment', 'paid_pending_ticket', 'pending_admin_review', 'completed']
 
 export default function TicketDetail() {
   const { id } = useParams()
@@ -32,6 +32,7 @@ export default function TicketDetail() {
   const [chatLoading, setChatLoading] = useState(false)
   const [fileUrl, setFileUrl]         = useState(null)
   const [fileLoading, setFileLoading] = useState(false)
+  const [uploadLoading, setUploadLoading] = useState(false)
   const [msg, setMsg]                 = useState('')
   const [error, setError]             = useState('')
 
@@ -183,7 +184,7 @@ export default function TicketDetail() {
       seller_id: ticket.seller_id,
       price,
       type,
-      status: 'pending',
+      status: 'pending_payment',
     }).select().single()
     if (insErr || !data?.id) {
       setError(insErr?.message || 'Failed to create order')
@@ -300,18 +301,60 @@ export default function TicketDetail() {
     if (ok) { setMsg('Order canceled.'); setMyOrder(null) }
   }
 
-  async function handleViewFile() {
-    if (fileUrl) { window.open(fileUrl, '_blank'); return }
-    setFileLoading(true)
+  async function handleViewOrderFile() {
+    if (!activeOrder?.id) return
+    setFileLoading(true); setError('')
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch(`/api/ticket-file?ticket_id=${ticket.id}`, {
+    const res = await fetch(`/api/ticket-file?order_id=${activeOrder.id}`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
-    const data = await res.json()
-    if (!res.ok) { setError(data.error); setFileLoading(false); return }
+    const data = await res.json().catch(() => ({}))
+    setFileLoading(false)
+    if (!res.ok) { setError(data.error || 'Could not fetch ticket'); return }
     setFileUrl(data.url)
     window.open(data.url, '_blank')
-    setFileLoading(false)
+  }
+
+  async function handleUploadTicket(e) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // reset input
+    if (!file || !activeOrder?.id) return
+    if (!activeOrder.seller_id || activeOrder.seller_id !== user.id) {
+      setError('Only the seller can upload the ticket'); return
+    }
+    if (activeOrder.status !== 'paid_pending_ticket') {
+      setError(`Cannot upload — order is ${activeOrder.status}`); return
+    }
+    if (file.size > 10 * 1024 * 1024) { setError('File too large (max 10 MB)'); return }
+
+    setUploadLoading(true); setError('')
+    const b64 = await new Promise((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve(String(r.result).split(',')[1] || '')
+      r.onerror = () => reject(r.error)
+      r.readAsDataURL(file)
+    })
+
+    const { data: { session } } = await supabase.auth.getSession()
+    try {
+      const res = await fetch('/api/upload-ticket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          order_id: activeOrder.id,
+          file_base64: b64,
+          filename: file.name,
+          content_type: file.type || 'application/octet-stream',
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { setError(data.error || 'Upload failed'); setUploadLoading(false); return }
+      setMsg('Ticket uploaded. Admin will review it shortly.')
+      await loadOrders(ticket, user)
+    } catch (err) {
+      setError(`Upload failed: ${err.message}`)
+    }
+    setUploadLoading(false)
   }
 
   async function handleSendMessage(e) {
@@ -358,38 +401,43 @@ export default function TicketDetail() {
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '.5rem', padding: '.65rem .85rem', background: 'var(--surface2)', borderRadius: 8, marginBottom: '.5rem' }}>
         <span style={{ fontWeight: 600, fontSize: '.88rem' }}>{label}</span>
         <span style={{ fontSize: '.78rem', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 700 }}>
-          {activeOrder.status}
+          {activeOrder.status.replace(/_/g, ' ')}
         </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
-          {/* Seller actions */}
-          {isMySellerOrder && activeOrder.status === 'pending' && (
-            seller?.stripe_account_id ? (
-              <>
-                <button className="btn btn-success btn-sm" onClick={() => handleAccept(activeOrder)} disabled={actionLoading}>Accept</button>
-                <button className="btn btn-danger btn-sm" onClick={() => handleReject(activeOrder)} disabled={actionLoading}>Reject</button>
-              </>
-            ) : (
-              <>
-                <Link to="/dashboard" className="btn btn-primary btn-sm">💳 Connect Stripe to accept</Link>
-                <button className="btn btn-danger btn-sm" onClick={() => handleReject(activeOrder)} disabled={actionLoading}>Reject</button>
-              </>
-            )
-          )}
-          {isMySellerOrder && activeOrder.status === 'accepted' && (
-            <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>Awaiting buyer payment</span>
-          )}
-          {/* Buyer actions */}
-          {isMyBuyerOrder && activeOrder.status === 'pending' && (
-            <button className="btn btn-ghost btn-sm" onClick={() => handleCancel(activeOrder)} disabled={actionLoading}>Cancel</button>
-          )}
-          {isMyBuyerOrder && activeOrder.status === 'accepted' && (
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* pending_payment ─────────────────────────────────────── */}
+          {isMyBuyerOrder && activeOrder.status === 'pending_payment' && (
             <>
               <button className="btn btn-primary btn-sm" onClick={() => setCheckoutModal(true)}>Pay now</button>
               <button className="btn btn-ghost btn-sm" onClick={() => handleCancel(activeOrder)} disabled={actionLoading}>Cancel</button>
             </>
           )}
-          {activeOrder.status === 'paid' && (
-            <span style={{ fontSize: '.8rem', color: 'var(--success)', fontWeight: 600 }}>✓ Paid</span>
+          {isMySellerOrder && activeOrder.status === 'pending_payment' && (
+            <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>Awaiting buyer payment</span>
+          )}
+
+          {/* paid_pending_ticket ─────────────────────────────────── */}
+          {isMySellerOrder && activeOrder.status === 'paid_pending_ticket' && (
+            <button className="btn btn-primary btn-sm" onClick={() => document.getElementById('upload-ticket-input')?.click()} disabled={uploadLoading}>
+              {uploadLoading ? 'Uploading…' : '📤 Upload ticket'}
+            </button>
+          )}
+          {isMyBuyerOrder && activeOrder.status === 'paid_pending_ticket' && (
+            <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>⏳ Waiting for seller to upload ticket</span>
+          )}
+
+          {/* pending_admin_review ────────────────────────────────── */}
+          {activeOrder.status === 'pending_admin_review' && (
+            <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>🛡 Admin reviewing the ticket</span>
+          )}
+
+          {/* completed ───────────────────────────────────────────── */}
+          {isMyBuyerOrder && activeOrder.status === 'completed' && (
+            <button className="btn btn-success btn-sm" onClick={handleViewOrderFile} disabled={fileLoading}>
+              {fileLoading ? 'Loading…' : '🎟 View your ticket'}
+            </button>
+          )}
+          {!isMyBuyerOrder && activeOrder.status === 'completed' && (
+            <span style={{ fontSize: '.8rem', color: 'var(--success)', fontWeight: 600 }}>✓ Completed</span>
           )}
         </div>
       </div>
@@ -400,6 +448,15 @@ export default function TicketDetail() {
     <div className="page">
       {msg   && <div className="alert alert-success" style={{ marginBottom: '1.25rem' }}>{msg}</div>}
       {error && <div className="alert alert-error"   style={{ marginBottom: '1.25rem' }}>{error}</div>}
+
+      {/* Hidden file input used by the seller's "Upload ticket" button */}
+      <input
+        id="upload-ticket-input"
+        type="file"
+        accept="image/*,application/pdf"
+        style={{ display: 'none' }}
+        onChange={handleUploadTicket}
+      />
 
       <div className="ticket-detail">
         {/* LEFT */}
@@ -518,16 +575,6 @@ export default function TicketDetail() {
             <div className="ticket-detail-price">€{Number(ticket.price).toFixed(2)}</div>
 
             <div className="ticket-actions">
-              {ticket.file_url && (isOwner ? (
-                <a href={ticket.file_url} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
-                  📄 View ticket file
-                </a>
-              ) : myOrder?.status === 'paid' ? (
-                <button className="btn btn-outline" onClick={handleViewFile} disabled={fileLoading}>
-                  {fileLoading ? 'Loading…' : '📄 View ticket file'}
-                </button>
-              ) : null)}
-
               {isOwner ? (
                 <>
                   <Link to={`/edit/${ticket.id}`} className="btn btn-primary">Edit listing</Link>
@@ -537,9 +584,10 @@ export default function TicketDetail() {
                 <Link to="/login" className="btn btn-primary btn-lg">Log in to buy</Link>
               ) : myOrder ? (
                 <div className="alert" style={{ textAlign: 'center', marginBottom: 0, background: 'var(--surface2)' }}>
-                  {myOrder.status === 'pending'  && '⏳ Waiting for seller response'}
-                  {myOrder.status === 'accepted' && '✅ Seller accepted — pay below in chat'}
-                  {myOrder.status === 'paid'     && '✅ Paid. Your ticket file is available.'}
+                  {myOrder.status === 'pending_payment'      && '💳 Pay in the chat below to confirm your ticket'}
+                  {myOrder.status === 'paid_pending_ticket'  && '⏳ Waiting for seller to upload the ticket'}
+                  {myOrder.status === 'pending_admin_review' && '🛡 Admin is reviewing the ticket'}
+                  {myOrder.status === 'completed'            && '✅ Ticket approved — open it from the chat'}
                 </div>
               ) : isBuyer && canAct ? (
                 <>

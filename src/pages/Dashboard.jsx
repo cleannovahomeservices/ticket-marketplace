@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import TicketCard from '../components/TicketCard'
 
 export default function Dashboard() {
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const [tab, setTab] = useState('selling')
   const [myTickets, setMyTickets] = useState([])
   const [myOrders, setMyOrders]   = useState([])
@@ -21,7 +21,7 @@ export default function Dashboard() {
       const [{ data: tickets }, { data: orders }, { data: received }, { data: prof }] = await Promise.all([
         supabase.from('tickets').select('*').eq('seller_id', user.id).order('created_at', { ascending: false }),
         supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('buyer_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('seller_id', user.id).in('status', ['pending','accepted','paid']).order('created_at', { ascending: false }),
+        supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('seller_id', user.id).in('status', ['pending_payment','paid_pending_ticket','pending_admin_review','completed']).order('created_at', { ascending: false }),
         supabase.from('profiles').select('*').eq('id', user.id).single(),
       ])
       setMyTickets(tickets || [])
@@ -109,6 +109,7 @@ export default function Dashboard() {
           )}
           <Link to="/profile" className="btn btn-outline btn-sm">Edit profile</Link>
           <Link to="/create" className="btn btn-primary btn-sm">+ Sell ticket</Link>
+          {isAdmin && <Link to="/admin" className="btn btn-dark btn-sm">🛡 Admin panel</Link>}
         </div>
       </div>
 
@@ -170,9 +171,10 @@ export default function Dashboard() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
                     <span className="order-price">€{Number(order.price).toFixed(2)}</span>
-                    {order.status === 'pending' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Needs response</span>}
-                    {order.status === 'accepted' && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Awaiting payment</span>}
-                    {order.status === 'paid' && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Paid</span>}
+                    {order.status === 'pending_payment'      && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Awaiting payment</span>}
+                    {order.status === 'paid_pending_ticket'  && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>📤 Upload ticket</span>}
+                    {order.status === 'pending_admin_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 In admin review</span>}
+                    {order.status === 'completed'            && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Completed</span>}
                     <Link to={`/ticket/${order.ticket_id}`} className="btn btn-primary btn-sm">Open chat</Link>
                   </div>
                 </div>
@@ -203,13 +205,11 @@ export default function Dashboard() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
                     <span className="order-price">€{Number(order.price).toFixed(2)}</span>
-                    {order.status === 'pending' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Waiting for seller</span>}
-                    {order.status === 'accepted' && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Pay now</span>}
-                    {order.status === 'paid' && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Paid</span>}
-                    {order.status === 'pending_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Pending review</span>}
-                    {order.status === 'completed' && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Completed</span>}
-                    {order.status === 'rejected' && <span style={{ color: 'var(--danger)', fontWeight: 600, fontSize: '.85rem' }}>✗ Rejected</span>}
-                    {order.status === 'failed' && <span style={{ color: 'var(--muted)', fontWeight: 600, fontSize: '.85rem' }}>Failed</span>}
+                    {order.status === 'pending_payment'      && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Pay now</span>}
+                    {order.status === 'paid_pending_ticket'  && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Waiting for seller to upload</span>}
+                    {order.status === 'pending_admin_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 Admin reviewing</span>}
+                    {order.status === 'completed'            && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Completed</span>}
+                    {order.status === 'rejected'             && <span style={{ color: 'var(--danger)',  fontWeight: 600, fontSize: '.85rem' }}>✗ Rejected</span>}
                     <Link to={`/ticket/${order.ticket_id}`} className="btn btn-ghost btn-sm">View</Link>
                   </div>
                 </div>

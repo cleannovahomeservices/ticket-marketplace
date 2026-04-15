@@ -31,6 +31,21 @@ export async function getAuthUser(req) {
   return user
 }
 
+// Verify the caller is authenticated AND has role='admin'. Returns
+// { user, profile, reason } — profile is non-null only when the user is
+// a real admin, so endpoints can gate with `if (!profile) return 403`.
+export async function requireAdmin(req) {
+  const { user, reason } = await requireUser(req)
+  if (!user) return { user: null, profile: null, reason }
+  const supabase = getSupabaseAdmin()
+  const { data: profile, error } = await supabase
+    .from('profiles').select('id, role, is_admin').eq('id', user.id).single()
+  if (error) return { user, profile: null, reason: `profile_lookup_failed: ${error.message}` }
+  const isAdmin = profile?.role === 'admin' || profile?.is_admin === true
+  if (!isAdmin) return { user, profile: null, reason: 'not_admin' }
+  return { user, profile, reason: null }
+}
+
 // New helper that returns a diagnostic reason on failure so callers can
 // surface specific 401 details to the client instead of a black-box
 // "Unauthorized".

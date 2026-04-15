@@ -19,11 +19,11 @@ export default async function handler(req, res) {
   if (order.buyer_id !== user.id) {
     json(res, 403, { error: 'Only the buyer can cancel this order' }); return
   }
-  if (!['pending', 'accepted'].includes(order.status)) {
+  if (order.status !== 'pending_payment') {
     json(res, 400, { error: `Order is ${order.status}, cannot cancel` }); return
   }
 
-  if (order.status === 'accepted' && order.stripe_payment_intent_id) {
+  if (order.stripe_payment_intent_id) {
     try { await stripe.paymentIntents.cancel(order.stripe_payment_intent_id) } catch { /* already resolved */ }
   }
 
@@ -33,7 +33,7 @@ export default async function handler(req, res) {
   if (upErr) { json(res, 500, { error: upErr.message }); return }
 
   const { data: remaining } = await supabase
-    .from('orders').select('id').eq('ticket_id', order.ticket_id).in('status', ['pending','accepted','paid'])
+    .from('orders').select('id').eq('ticket_id', order.ticket_id).in('status', ['pending_payment','paid_pending_ticket','pending_admin_review','completed'])
   if (!remaining || remaining.length === 0) {
     await supabase.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id)
   }
