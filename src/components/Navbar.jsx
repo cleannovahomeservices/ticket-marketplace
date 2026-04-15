@@ -1,19 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
 export default function Navbar() {
-  const { user } = useAuth()
+  const { user, isAdmin } = useAuth()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [isAdmin, setIsAdmin] = useState(false)
-
-  useEffect(() => {
-    if (!user) { setIsAdmin(false); return }
-    supabase.from('profiles').select('is_admin').eq('id', user.id).single()
-      .then(({ data }) => setIsAdmin(!!data?.is_admin))
-  }, [user])
 
   async function handleLogout() {
     await supabase.auth.signOut()

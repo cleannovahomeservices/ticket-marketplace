@@ -19,9 +19,10 @@ export default function Home() {
       try {
         const { data, error } = await supabase
           .from('tickets')
-          .select('*')
+          .select('id, title, price, category, location, event_date, image_url, image_urls, status, created_at')
           .eq('status', 'active')
           .order('created_at', { ascending: false })
+          .limit(100)
 
         if (!alive) return
         if (error) {
