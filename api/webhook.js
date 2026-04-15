@@ -29,13 +29,19 @@ export default async function handler(req, res) {
           status: 'paid', updated_at: new Date().toISOString(),
         }).eq('id', order.id)
         await supabase.from('tickets').update({ status: 'completed' }).eq('id', order.ticket_id)
-        await supabase.from('messages').insert({
-          order_id: order.id,
-          ticket_id: order.ticket_id,
-          sender_id: order.seller_id || order.buyer_id,
-          receiver_id: null,
-          content: '💳 Payment received. The sale is complete.',
-        }).catch(() => {})
+        if (order.id) {
+          const { data: full } = await supabase
+            .from('orders').select('id, ticket_id, buyer_id, seller_id').eq('id', order.id).single()
+          if (full?.id) {
+            await supabase.from('messages').insert({
+              order_id: full.id,
+              ticket_id: full.ticket_id,
+              sender_id: full.seller_id,
+              receiver_id: full.buyer_id,
+              content: '💳 Payment received. The sale is complete.',
+            }).catch(() => {})
+          }
+        }
       }
       break
     }

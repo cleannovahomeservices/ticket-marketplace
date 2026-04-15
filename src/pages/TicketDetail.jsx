@@ -163,20 +163,34 @@ export default function TicketDetail() {
       type,
       status: 'pending',
     }).select().single()
-    if (insErr) { setError(insErr.message); setActionLoading(false); return }
-    // Seed the chat with a system line so both parties see something
-    await supabase.from('messages').insert({
-      order_id: data.id,
-      ticket_id: ticket.id,
-      sender_id: user.id,
-      receiver_id: ticket.seller_id,
-      content: type === 'buy'
-        ? `🛒 Buy request placed at €${Number(price).toFixed(2)}.`
-        : `💬 New offer: €${Number(price).toFixed(2)}.`,
-    })
+    if (insErr || !data?.id) {
+      setError(insErr?.message || 'Failed to create order')
+      setActionLoading(false)
+      return
+    }
+    // Order is confirmed — now seed the chat. order_id is guaranteed here.
+    await sendOrderMessage(data, type === 'buy'
+      ? `🛒 Buy request placed at €${Number(price).toFixed(2)}.`
+      : `💬 New offer: €${Number(price).toFixed(2)}.`)
     setMyOrder(data)
     setMsg(type === 'buy' ? 'Buy request sent. Waiting for seller response.' : 'Offer sent.')
     setActionLoading(false)
+  }
+
+  // Central insert for any chat message — refuses to write without a valid order_id.
+  async function sendOrderMessage(order, content) {
+    if (!order?.id) {
+      console.error('sendOrderMessage: missing order_id — message not sent')
+      return { error: 'missing order_id' }
+    }
+    const receiver_id = user.id === order.seller_id ? order.buyer_id : order.seller_id
+    return supabase.from('messages').insert({
+      order_id: order.id,
+      ticket_id: order.ticket_id,
+      sender_id: user.id,
+      receiver_id,
+      content,
+    })
   }
 
   async function handleBuyNow() { await createOrder('buy', Number(ticket.price)) }
@@ -236,16 +250,9 @@ export default function TicketDetail() {
 
   async function handleSendMessage(e) {
     e.preventDefault()
-    if (!chatMsg.trim() || !activeOrder) return
+    if (!chatMsg.trim() || !activeOrder?.id) return
     setChatLoading(true)
-    const receiver_id = user.id === activeOrder.seller_id ? activeOrder.buyer_id : activeOrder.seller_id
-    await supabase.from('messages').insert({
-      order_id: activeOrder.id,
-      ticket_id: activeOrder.ticket_id,
-      sender_id: user.id,
-      receiver_id,
-      content: chatMsg.trim(),
-    })
+    await sendOrderMessage(activeOrder, chatMsg.trim())
     setChatMsg('')
     setChatLoading(false)
   }

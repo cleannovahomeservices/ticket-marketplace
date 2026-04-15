@@ -20,7 +20,9 @@ export default async function handler(req, res) {
     .from('orders').select('*').eq('id', order_id).single()
 
   if (!order) { json(res, 404, { error: 'Order not found' }); return }
-  if (order.status !== 'pending_review') { json(res, 400, { error: 'Order is not in pending_review status' }); return }
+  if (!['pending', 'accepted'].includes(order.status)) {
+    json(res, 400, { error: `Order is ${order.status}, cannot reject` }); return
+  }
   if (!order.stripe_payment_intent_id) { json(res, 400, { error: 'No payment intent on this order' }); return }
 
   try {

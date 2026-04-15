@@ -73,14 +73,16 @@ export default async function handler(req, res) {
 
   await supabase.from('tickets').update({ status: 'pending' }).eq('id', order.ticket_id)
 
-  // Post a system chat message inside the order so the buyer sees the update immediately.
-  await supabase.from('messages').insert({
-    order_id: order.id,
-    ticket_id: order.ticket_id,
-    sender_id: user.id,
-    receiver_id: order.buyer_id,
-    content: '✅ Offer accepted. Complete the payment to confirm your ticket.',
-  })
+  // Post a system chat message — order.id is guaranteed by the fetch above.
+  if (order.id) {
+    await supabase.from('messages').insert({
+      order_id: order.id,
+      ticket_id: order.ticket_id,
+      sender_id: user.id,
+      receiver_id: order.buyer_id,
+      content: '✅ Offer accepted. Complete the payment to confirm your ticket.',
+    })
+  }
 
   json(res, 200, { success: true, order_id: order.id })
 }

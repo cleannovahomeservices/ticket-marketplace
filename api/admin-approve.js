@@ -21,18 +21,16 @@ export default async function handler(req, res) {
     .from('orders').select('*').eq('id', order_id).single()
 
   if (!order) { json(res, 404, { error: 'Order not found' }); return }
-  if (order.status !== 'pending_review') { json(res, 400, { error: 'Order is not in pending_review status' }); return }
+  if (order.status !== 'accepted') { json(res, 400, { error: `Order is ${order.status}, cannot capture` }); return }
   if (!order.stripe_payment_intent_id) { json(res, 400, { error: 'No payment intent on this order' }); return }
 
   try {
-    // Capture the held payment (transfer_data was set at creation so transfer happens automatically)
     await stripe.paymentIntents.capture(order.stripe_payment_intent_id)
   } catch (err) {
     json(res, 500, { error: `Capture failed: ${err.message}` }); return
   }
 
-  // Update order + ticket
-  await supabase.from('orders').update({ status: 'completed' }).eq('id', order_id)
+  await supabase.from('orders').update({ status: 'paid' }).eq('id', order_id)
   await supabase.from('tickets').update({ status: 'completed' }).eq('id', order.ticket_id)
 
   json(res, 200, { success: true })

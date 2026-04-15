@@ -39,13 +39,15 @@ export default async function handler(req, res) {
   }
 
   const actorIsSeller = user.id === order.seller_id
-  await supabase.from('messages').insert({
-    order_id: order.id,
-    ticket_id: order.ticket_id,
-    sender_id: user.id,
-    receiver_id: actorIsSeller ? order.buyer_id : order.seller_id,
-    content: actorIsSeller ? '❌ Seller rejected this offer.' : '❌ Buyer canceled this order.',
-  })
+  if (order.id) {
+    await supabase.from('messages').insert({
+      order_id: order.id,
+      ticket_id: order.ticket_id,
+      sender_id: user.id,
+      receiver_id: actorIsSeller ? order.buyer_id : order.seller_id,
+      content: actorIsSeller ? '❌ Seller rejected this offer.' : '❌ Buyer canceled this order.',
+    })
+  }
 
   json(res, 200, { success: true })
 }

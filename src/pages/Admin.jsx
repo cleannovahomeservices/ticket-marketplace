@@ -4,10 +4,10 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
 const STATUS_COLORS = {
-  pending_review: 'var(--warning)',
-  completed:      'var(--success)',
-  rejected:       'var(--danger)',
-  failed:         'var(--muted)',
+  pending:   'var(--muted)',
+  accepted:  'var(--warning)',
+  paid:      'var(--success)',
+  rejected:  'var(--danger)',
 }
 
 export default function Admin() {
@@ -53,7 +53,7 @@ export default function Admin() {
     if (!res.ok) { setErr(data.error || 'Action failed'); setProcessing(null); return }
     setMsg(`Order ${action} successfully.`)
     setOrders(os => os.map(o => o.id === order_id
-      ? { ...o, status: action === 'approved' ? 'completed' : 'rejected' }
+      ? { ...o, status: action === 'approved' ? 'paid' : 'rejected' }
       : o
     ))
     setProcessing(null)
@@ -61,11 +61,11 @@ export default function Admin() {
 
   // ── Derived stats ──────────────────────────────────────────────
   const stats = useMemo(() => {
-    const pending   = orders.filter(o => o.status === 'pending_review').length
-    const completed = orders.filter(o => o.status === 'completed')
-    const rejected  = orders.filter(o => o.status === 'rejected').length
-    const revenue   = completed.reduce((s, o) => s + Number(o.price), 0)
-    return { pending, completed: completed.length, rejected, revenue }
+    const pending  = orders.filter(o => o.status === 'pending' || o.status === 'accepted').length
+    const paid     = orders.filter(o => o.status === 'paid')
+    const rejected = orders.filter(o => o.status === 'rejected').length
+    const revenue  = paid.reduce((s, o) => s + Number(o.price), 0)
+    return { pending, completed: paid.length, rejected, revenue }
   }, [orders])
 
   // ── Filtered orders ────────────────────────────────────────────
@@ -86,8 +86,8 @@ export default function Admin() {
   if (loading) return <div className="page-loading">Loading…</div>
   if (!profile?.is_admin) return <Navigate to="/" replace />
 
-  const pendingOrders   = filtered.filter(o => o.status === 'pending_review')
-  const otherOrders     = filtered.filter(o => o.status !== 'pending_review')
+  const pendingOrders = filtered.filter(o => o.status === 'pending' || o.status === 'accepted')
+  const otherOrders   = filtered.filter(o => o.status !== 'pending' && o.status !== 'accepted')
 
   return (
     <div className="page">
@@ -132,10 +132,10 @@ export default function Admin() {
           style={{ width: 'auto' }}
         >
           <option value="all">All statuses</option>
-          <option value="pending_review">Pending review</option>
-          <option value="completed">Completed</option>
+          <option value="pending">Pending</option>
+          <option value="accepted">Accepted</option>
+          <option value="paid">Paid</option>
           <option value="rejected">Rejected</option>
-          <option value="failed">Failed</option>
         </select>
         {(search || statusFilter !== 'all') && (
           <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setStatusFilter('all') }}>
@@ -256,7 +256,7 @@ function OrderCard({ order, processing, onApprove, onReject, readOnly }) {
         )}
       </div>
 
-      {!readOnly && order.status === 'pending_review' && (
+      {!readOnly && (order.status === 'pending' || order.status === 'accepted') && (
         <div style={{ display: 'flex', gap: '.5rem', flexShrink: 0 }}>
           <button
             className="btn btn-success btn-sm"
