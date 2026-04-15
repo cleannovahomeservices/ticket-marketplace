@@ -1,5 +1,9 @@
 import { stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS } from './_utils.js'
 
+// Seller accepts a pending order. Creates a platform-controlled
+// manual-capture PaymentIntent (no on_behalf_of / transfer_data — the
+// seller does NOT need card_payments capability; the transfer to the
+// seller happens in admin-approve.js via stripe.transfers.create()).
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS); res.end(); return }
   if (req.method !== 'POST') { json(res, 405, { error: 'Method not allowed' }); return }
@@ -16,29 +20,9 @@ export default async function handler(req, res) {
     .from('orders').select('*').eq('id', order_id).single()
   if (oErr || !order) { json(res, 404, { error: 'Order not found' }); return }
   if (order.seller_id !== user.id) { json(res, 403, { error: 'Only the seller can accept this order' }); return }
-  // Under the new admin-review flow, an order is `pending_payment` from
-  // the moment it is created. Accepting here means "re-issuing / refreshing
-  // the PaymentIntent" for that order — mostly a no-op since the buyer can
-  // pay directly. We keep the endpoint for backwards compatibility.
   if (order.status !== 'pending_payment') { json(res, 400, { error: `Order is ${order.status}, cannot accept` }); return }
 
-  const { data: seller } = await supabase
-    .from('profiles').select('stripe_account_id').eq('id', order.seller_id).single()
-  const sellerStripeId = seller?.stripe_account_id
-  if (!sellerStripeId) {
-    json(res, 400, { error: 'Seller must complete payout setup before accepting', code: 'stripe_not_connected' }); return
-  }
-
-  let account
-  try { account = await stripe.accounts.retrieve(sellerStripeId) }
-  catch (err) { json(res, 500, { error: `Stripe account lookup failed: ${err.message}` }); return }
-
-  if (!account.charges_enabled || !account.payouts_enabled) {
-    json(res, 400, { error: 'Seller must complete payout setup before accepting', code: 'stripe_not_connected' }); return
-  }
-
   const amountCents = Math.round(Number(order.price) * 100)
-  const platformFee = Math.round(amountCents * 0.05)
 
   let paymentIntent
   try {
@@ -47,8 +31,6 @@ export default async function handler(req, res) {
       currency: 'eur',
       payment_method_types: ['card'],
       capture_method: 'manual',
-      transfer_data: { destination: sellerStripeId },
-      application_fee_amount: platformFee,
       metadata: {
         order_id: order.id,
         ticket_id: order.ticket_id,
@@ -56,7 +38,10 @@ export default async function handler(req, res) {
         seller_id: order.seller_id,
       },
     })
-  } catch (err) { json(res, 500, { error: err.message }); return }
+  } catch (err) {
+    console.error(`[accept-order] PI create failed:`, err.message)
+    json(res, 500, { error: err.message }); return
+  }
 
   const { error: uErr } = await supabase.from('orders').update({
     status: 'pending_payment',
@@ -78,7 +63,6 @@ export default async function handler(req, res) {
 
   await supabase.from('tickets').update({ status: 'pending' }).eq('id', order.ticket_id)
 
-  // Post a system chat message — order.id is guaranteed by the fetch above.
   if (order.id) {
     await supabase.from('messages').insert({
       order_id: order.id,
@@ -89,5 +73,6 @@ export default async function handler(req, res) {
     })
   }
 
+  console.log(`[accept-order] ✓ order=${order.id} accepted, pi=${paymentIntent.id}`)
   json(res, 200, { success: true, order_id: order.id })
 }

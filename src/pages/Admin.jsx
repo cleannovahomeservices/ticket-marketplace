@@ -160,7 +160,7 @@ export default function Admin() {
       {pendingReviews.length > 0 && (
         <section style={{ marginBottom: '2.5rem' }}>
           <h2 style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '1rem', color: 'var(--warning)' }}>
-            🛡 Pending Reviews ({pendingReviews.length})
+            🛡 Pending verification ({pendingReviews.length})
           </h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {pendingReviews.map(order => (

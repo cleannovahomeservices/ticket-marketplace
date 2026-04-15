@@ -197,7 +197,7 @@ export default function Dashboard() {
                     <span className="order-price">€{Number(order.price).toFixed(2)}</span>
                     {order.status === 'pending_payment'      && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Awaiting payment</span>}
                     {order.status === 'paid_pending_ticket'  && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>📤 Upload ticket</span>}
-                    {order.status === 'pending_admin_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 In admin review</span>}
+                    {order.status === 'pending_admin_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 Ticket under review</span>}
                     {order.status === 'completed'            && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Completed</span>}
                     <Link to={`/ticket/${order.ticket_id}`} className="btn btn-primary btn-sm">Open chat</Link>
                   </div>
@@ -231,7 +231,7 @@ export default function Dashboard() {
                     <span className="order-price">€{Number(order.price).toFixed(2)}</span>
                     {order.status === 'pending_payment'      && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Pay now</span>}
                     {order.status === 'paid_pending_ticket'  && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Waiting for seller to upload</span>}
-                    {order.status === 'pending_admin_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 Admin reviewing</span>}
+                    {order.status === 'pending_admin_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 Waiting for admin approval</span>}
                     {order.status === 'completed'            && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Completed</span>}
                     {order.status === 'rejected'             && <span style={{ color: 'var(--danger)',  fontWeight: 600, fontSize: '.85rem' }}>✗ Rejected</span>}
                     <Link to={`/ticket/${order.ticket_id}`} className="btn btn-ghost btn-sm">View</Link>

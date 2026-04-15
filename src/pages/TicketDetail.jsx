@@ -426,8 +426,11 @@ export default function TicketDetail() {
           )}
 
           {/* pending_admin_review ────────────────────────────────── */}
-          {activeOrder.status === 'pending_admin_review' && (
-            <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>🛡 Admin reviewing the ticket</span>
+          {isMyBuyerOrder && activeOrder.status === 'pending_admin_review' && (
+            <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>🛡 Waiting for admin approval</span>
+          )}
+          {isMySellerOrder && activeOrder.status === 'pending_admin_review' && (
+            <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>🛡 Ticket under review</span>
           )}
 
           {/* completed ───────────────────────────────────────────── */}
@@ -586,7 +589,7 @@ export default function TicketDetail() {
                 <div className="alert" style={{ textAlign: 'center', marginBottom: 0, background: 'var(--surface2)' }}>
                   {myOrder.status === 'pending_payment'      && '💳 Pay in the chat below to confirm your ticket'}
                   {myOrder.status === 'paid_pending_ticket'  && '⏳ Waiting for seller to upload the ticket'}
-                  {myOrder.status === 'pending_admin_review' && '🛡 Admin is reviewing the ticket'}
+                  {myOrder.status === 'pending_admin_review' && '🛡 Waiting for admin approval'}
                   {myOrder.status === 'completed'            && '✅ Ticket approved — open it from the chat'}
                 </div>
               ) : isBuyer && canAct ? (
