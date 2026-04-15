@@ -4,11 +4,13 @@ import stripePromise from '../lib/stripe'
 import { supabase } from '../lib/supabase'
 
 // ── Inner form (inside <Elements>) ────────────────────────────
-function PaymentForm({ ticket, orderId, onSuccess, onCancel }) {
+function PaymentForm({ ticket, order, onSuccess, onCancel }) {
   const stripe = useStripe()
   const elements = useElements()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  const price = Number(order.price)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -30,11 +32,11 @@ function PaymentForm({ ticket, orderId, onSuccess, onCancel }) {
       return
     }
 
-    onSuccess(orderId)
+    onSuccess(order.id)
   }
 
-  const platformFee = +(Number(ticket.price) * 0.05).toFixed(2)
-  const sellerReceives = +(Number(ticket.price) - platformFee).toFixed(2)
+  const platformFee = +(price * 0.05).toFixed(2)
+  const sellerReceives = +(price - platformFee).toFixed(2)
 
   return (
     <form onSubmit={handleSubmit}>
@@ -45,8 +47,8 @@ function PaymentForm({ ticket, orderId, onSuccess, onCancel }) {
       {/* Price breakdown */}
       <div style={{ background: 'var(--surface2)', borderRadius: 8, padding: '.85rem 1rem', marginBottom: '1.1rem', fontSize: '.88rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', marginBottom: '.35rem' }}>
-          <span>Ticket price</span>
-          <span>€{Number(ticket.price).toFixed(2)}</span>
+          <span>{order.type === 'offer' ? 'Accepted offer' : 'Ticket price'}</span>
+          <span>€{price.toFixed(2)}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', marginBottom: '.5rem' }}>
           <span>Service fee (5%)</span>
@@ -54,7 +56,7 @@ function PaymentForm({ ticket, orderId, onSuccess, onCancel }) {
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, borderTop: '1px solid var(--border)', paddingTop: '.5rem', color: 'var(--text)' }}>
           <span>You pay</span>
-          <span style={{ color: 'var(--accent2)', fontSize: '1rem' }}>€{Number(ticket.price).toFixed(2)}</span>
+          <span style={{ color: 'var(--accent2)', fontSize: '1rem' }}>€{price.toFixed(2)}</span>
         </div>
         <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginTop: '.4rem' }}>
           Seller receives €{sellerReceives.toFixed(2)} after the platform fee.
@@ -64,12 +66,12 @@ function PaymentForm({ ticket, orderId, onSuccess, onCancel }) {
       {error && <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{error}</div>}
       <div style={{ display: 'flex', gap: '.75rem' }}>
         <button type="submit" className="btn btn-primary btn-lg" disabled={loading || !stripe} style={{ flex: 1 }}>
-          {loading ? 'Processing…' : `Pay €${Number(ticket.price).toFixed(2)}`}
+          {loading ? 'Processing…' : `Pay €${price.toFixed(2)}`}
         </button>
         <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={loading}>Cancel</button>
       </div>
       <p style={{ fontSize: '.75rem', color: 'var(--muted)', textAlign: 'center', marginTop: '.75rem' }}>
-        🔒 Payment secured by Stripe. Your card will be authorized but only charged after review.
+        🔒 Payment secured by Stripe.
       </p>
     </form>
   )
@@ -80,11 +82,10 @@ function SuccessView({ ticket, onClose }) {
   return (
     <div style={{ textAlign: 'center', padding: '1rem 0' }}>
       <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</div>
-      <h2 style={{ marginBottom: '.5rem' }}>Payment authorized!</h2>
+      <h2 style={{ marginBottom: '.5rem' }}>Payment successful!</h2>
       <p style={{ color: 'var(--muted)', lineHeight: 1.7, marginBottom: '1.5rem' }}>
-        Your payment for <strong style={{ color: 'var(--text)' }}>{ticket.title}</strong> has been
-        authorized. Your order is now <strong style={{ color: 'var(--warning)' }}>pending review</strong> —
-        we'll notify you once it's approved and your ticket is confirmed.
+        Your payment for <strong style={{ color: 'var(--text)' }}>{ticket.title}</strong> is complete.
+        The ticket file is now available in your dashboard.
       </p>
       <button className="btn btn-primary" style={{ width: '100%' }} onClick={onClose}>
         Got it
@@ -94,9 +95,8 @@ function SuccessView({ ticket, onClose }) {
 }
 
 // ── Main modal ─────────────────────────────────────────────────
-export default function CheckoutModal({ ticket, onClose, onSuccess }) {
+export default function CheckoutModal({ ticket, order, onClose, onSuccess }) {
   const [clientSecret, setClientSecret] = useState('')
-  const [orderId, setOrderId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [succeeded, setSucceeded] = useState(false)
@@ -104,7 +104,7 @@ export default function CheckoutModal({ ticket, onClose, onSuccess }) {
   const coverImage = ticket?.image_urls?.[0] || ticket?.image_url || null
 
   useEffect(() => {
-    async function createIntent() {
+    async function fetchIntent() {
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
       if (!token) { setError('You must be logged in.'); setLoading(false); return }
@@ -112,17 +112,16 @@ export default function CheckoutModal({ ticket, onClose, onSuccess }) {
       const res = await fetch('/api/create-payment-intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ ticket_id: ticket.id }),
+        body: JSON.stringify({ order_id: order.id }),
       })
       const data = await res.json()
 
       if (!res.ok) { setError(data.error || 'Failed to initialize payment.'); setLoading(false); return }
       setClientSecret(data.client_secret)
-      setOrderId(data.order_id)
       setLoading(false)
     }
-    createIntent()
-  }, [ticket.id])
+    fetchIntent()
+  }, [order.id])
 
   function handleSuccess(oid) {
     setSucceeded(true)
@@ -160,7 +159,7 @@ export default function CheckoutModal({ ticket, onClose, onSuccess }) {
                 )}
               </div>
               <div style={{ fontWeight: 800, fontSize: '1.2rem', color: 'var(--accent2)', flexShrink: 0 }}>
-                €{Number(ticket.price).toFixed(2)}
+                €{Number(order.price).toFixed(2)}
               </div>
             </div>
 
@@ -182,7 +181,7 @@ export default function CheckoutModal({ ticket, onClose, onSuccess }) {
 
             {!loading && !error && stripeOptions && (
               <Elements stripe={stripePromise} options={stripeOptions}>
-                <PaymentForm ticket={ticket} orderId={orderId} onSuccess={handleSuccess} onCancel={onClose} />
+                <PaymentForm ticket={ticket} order={order} onSuccess={handleSuccess} onCancel={onClose} />
               </Elements>
             )}
           </>

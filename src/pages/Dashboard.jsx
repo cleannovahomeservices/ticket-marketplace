@@ -165,6 +165,9 @@ export default function Dashboard() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
                     <span className="order-price">€{Number(order.price).toFixed(2)}</span>
+                    {order.status === 'pending' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Waiting for seller</span>}
+                    {order.status === 'accepted' && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Pay now</span>}
+                    {order.status === 'paid' && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Paid</span>}
                     {order.status === 'pending_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Pending review</span>}
                     {order.status === 'completed' && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Completed</span>}
                     {order.status === 'rejected' && <span style={{ color: 'var(--danger)', fontWeight: 600, fontSize: '.85rem' }}>✗ Rejected</span>}

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -7,6 +7,8 @@ import CheckoutModal from '../components/CheckoutModal'
 
 const CATEGORY_EMOJI = { concerts: '🎵', sports: '⚽', travel: '✈️', events: '🎉', experiences: '🌟' }
 
+const ACTIVE_STATUSES = ['pending', 'accepted', 'paid']
+
 export default function TicketDetail() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
@@ -14,91 +16,208 @@ export default function TicketDetail() {
   const navigate = useNavigate()
   const chatEndRef = useRef(null)
 
-  const [ticket, setTicket]     = useState(null)
-  const [seller, setSeller]     = useState(null)
-  const [offers, setOffers]     = useState([])
-  const [messages, setMessages] = useState([])
-  const [imgIdx, setImgIdx]     = useState(0)
-  const [loading, setLoading]   = useState(true)
-  const [offerModal, setOfferModal]     = useState(false)
+  const [ticket, setTicket]           = useState(null)
+  const [seller, setSeller]           = useState(null)
+  const [myOrder, setMyOrder]         = useState(null)       // buyer's active order on this ticket
+  const [sellerOrders, setSellerOrders] = useState([])       // all non-final orders (seller view)
+  const [selectedOrderId, setSelectedOrderId] = useState(null) // for the seller — which order's chat
+  const [buyerProfiles, setBuyerProfiles] = useState({})     // id → profile (seller view)
+  const [messages, setMessages]       = useState([])
+  const [imgIdx, setImgIdx]           = useState(0)
+  const [loading, setLoading]         = useState(true)
+  const [offerModal, setOfferModal]   = useState(false)
   const [checkoutModal, setCheckoutModal] = useState(false)
-  const [offerPrice, setOfferPrice]     = useState('')
-  const [chatMsg, setChatMsg]   = useState('')
+  const [offerPrice, setOfferPrice]   = useState('')
+  const [chatMsg, setChatMsg]         = useState('')
   const [actionLoading, setActionLoading] = useState(false)
-  const [chatLoading, setChatLoading]     = useState(false)
-  const [fileUrl, setFileUrl]   = useState(null)
+  const [chatLoading, setChatLoading] = useState(false)
+  const [fileUrl, setFileUrl]         = useState(null)
   const [fileLoading, setFileLoading] = useState(false)
-  const [msg, setMsg]   = useState('')
-  const [error, setError] = useState('')
+  const [msg, setMsg]                 = useState('')
+  const [error, setError]             = useState('')
 
-  // Show success message if redirected back from Stripe
+  const isOwner = user && ticket && user.id === ticket.seller_id
+  const isBuyer = user && ticket && user.id !== ticket.seller_id
+
+  // Active chat order (the one we subscribe to)
+  const activeOrder = isOwner
+    ? sellerOrders.find(o => o.id === selectedOrderId) || null
+    : myOrder
+  const activeOrderId = activeOrder?.id || null
+
   useEffect(() => {
     if (searchParams.get('payment') === 'success') {
-      setMsg("Payment authorized! Your order is pending review. We'll notify you once approved.")
+      setMsg('✅ Payment successful. The seller has been notified.')
     }
   }, [searchParams])
 
+  // ── Load ticket + seller + orders ─────────────────────────────
+  const loadOrders = useCallback(async (ticketRow, currentUser) => {
+    if (!currentUser || !ticketRow) return
+    if (currentUser.id === ticketRow.seller_id) {
+      const { data } = await supabase
+        .from('orders').select('*')
+        .eq('ticket_id', ticketRow.id)
+        .in('status', ACTIVE_STATUSES)
+        .order('created_at', { ascending: false })
+      const orders = data || []
+      setSellerOrders(orders)
+      setSelectedOrderId(prev => prev && orders.some(o => o.id === prev) ? prev : (orders[0]?.id || null))
+
+      const buyerIds = [...new Set(orders.map(o => o.buyer_id))]
+      if (buyerIds.length > 0) {
+        const { data: profs } = await supabase
+          .from('profiles').select('id, first_name, last_name, name, email, avatar_url').in('id', buyerIds)
+        const map = {}
+        ;(profs || []).forEach(p => { map[p.id] = p })
+        setBuyerProfiles(map)
+      }
+    } else {
+      const { data } = await supabase
+        .from('orders').select('*')
+        .eq('ticket_id', ticketRow.id)
+        .eq('buyer_id', currentUser.id)
+        .in('status', ACTIVE_STATUSES)
+        .order('created_at', { ascending: false })
+        .limit(1)
+      setMyOrder(data?.[0] || null)
+    }
+  }, [])
+
   useEffect(() => {
+    let active = true
     async function load() {
       const { data: t } = await supabase.from('tickets').select('*').eq('id', id).single()
+      if (!active) return
       if (!t) { navigate('/'); return }
       setTicket(t)
 
       const { data: s } = await supabase.from('profiles')
         .select('first_name, last_name, name, email, avatar_url, stripe_account_id')
         .eq('id', t.seller_id).single()
+      if (!active) return
       setSeller(s)
 
-      if (user) {
-        const [{ data: o }, { data: m }] = await Promise.all([
-          supabase.from('offers').select('*').eq('ticket_id', id).order('created_at'),
-          supabase.from('messages').select('*, profiles(first_name, last_name, name, avatar_url)').eq('ticket_id', id).order('created_at'),
-        ])
-        setOffers(o || [])
-        setMessages(m || [])
-      }
+      if (user) await loadOrders(t, user)
+      if (!active) return
       setLoading(false)
     }
     load()
-  }, [id, user, navigate])
+    return () => { active = false }
+  }, [id, user, navigate, loadOrders])
+
+  // ── Load messages for the active order ────────────────────────
+  useEffect(() => {
+    if (!activeOrderId) { setMessages([]); return }
+    let active = true
+    supabase
+      .from('messages')
+      .select('*, profiles(first_name, last_name, name, avatar_url)')
+      .eq('order_id', activeOrderId)
+      .order('created_at')
+      .then(({ data }) => { if (active) setMessages(data || []) })
+    return () => { active = false }
+  }, [activeOrderId])
+
+  // ── Realtime: messages for active order + orders for this ticket ──
+  useEffect(() => {
+    if (!activeOrderId) return
+    const ch = supabase
+      .channel(`order-msgs-${activeOrderId}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `order_id=eq.${activeOrderId}` },
+        async payload => {
+          const { data } = await supabase
+            .from('messages').select('*, profiles(first_name, last_name, name, avatar_url)')
+            .eq('id', payload.new.id).single()
+          if (data) setMessages(m => m.some(x => x.id === data.id) ? m : [...m, data])
+        })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [activeOrderId])
+
+  useEffect(() => {
+    if (!user || !ticket) return
+    const ch = supabase
+      .channel(`ticket-orders-${ticket.id}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'orders', filter: `ticket_id=eq.${ticket.id}` },
+        () => loadOrders(ticket, user))
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [user, ticket, loadOrders])
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  const isOwner  = user && ticket && user.id === ticket.seller_id
-  const isBuyer  = user && ticket && user.id !== ticket.seller_id
-  const canAct   = ticket && ticket.status === 'active'
-  const images   = ticket?.image_urls?.length ? ticket.image_urls : (ticket?.image_url ? [ticket.image_url] : [])
-  const sellerHasStripe = !!seller?.stripe_account_id
+  const canAct  = ticket && ticket.status === 'active'
+  const images  = ticket?.image_urls?.length ? ticket.image_urls : (ticket?.image_url ? [ticket.image_url] : [])
 
-  async function handleMakeOffer(e) {
-    e.preventDefault(); setActionLoading(true); setError('')
-    const { error } = await supabase.from('offers').insert({
-      ticket_id: ticket.id, buyer_id: user.id,
-      offer_price: parseFloat(offerPrice), status: 'pending',
+  // ── Actions ───────────────────────────────────────────────────
+  async function createOrder(type, price) {
+    setActionLoading(true); setError('')
+    const { data, error: insErr } = await supabase.from('orders').insert({
+      ticket_id: ticket.id,
+      buyer_id: user.id,
+      seller_id: ticket.seller_id,
+      price,
+      type,
+      status: 'pending',
+    }).select().single()
+    if (insErr) { setError(insErr.message); setActionLoading(false); return }
+    // Seed the chat with a system line so both parties see something
+    await supabase.from('messages').insert({
+      order_id: data.id,
+      ticket_id: ticket.id,
+      sender_id: user.id,
+      receiver_id: ticket.seller_id,
+      content: type === 'buy'
+        ? `🛒 Buy request placed at €${Number(price).toFixed(2)}.`
+        : `💬 New offer: €${Number(price).toFixed(2)}.`,
     })
-    if (error) { setError(error.message); setActionLoading(false); return }
-    setMsg('Offer sent! The seller will review it.')
-    setOfferModal(false); setOfferPrice(''); setActionLoading(false)
-  }
-
-  async function handleAcceptOffer(offer) {
-    setActionLoading(true)
-    await supabase.from('offers').update({ status: 'accepted' }).eq('id', offer.id)
-    await supabase.from('offers').update({ status: 'rejected' }).eq('ticket_id', ticket.id).neq('id', offer.id)
-    await supabase.from('orders').insert({
-      ticket_id: ticket.id, buyer_id: offer.buyer_id, seller_id: user.id,
-      price: offer.offer_price, status: 'pending_review',
-    })
-    await supabase.from('tickets').update({ status: 'pending' }).eq('id', ticket.id)
-    setTicket(t => ({ ...t, status: 'pending' }))
-    setOffers(os => os.map(o => o.id === offer.id ? { ...o, status: 'accepted' } : { ...o, status: 'rejected' }))
-    setMsg('Offer accepted. The buyer has been notified.')
+    setMyOrder(data)
+    setMsg(type === 'buy' ? 'Buy request sent. Waiting for seller response.' : 'Offer sent.')
     setActionLoading(false)
   }
 
-  async function handleRejectOffer(offer) {
-    await supabase.from('offers').update({ status: 'rejected' }).eq('id', offer.id)
-    setOffers(os => os.map(o => o.id === offer.id ? { ...o, status: 'rejected' } : o))
+  async function handleBuyNow() { await createOrder('buy', Number(ticket.price)) }
+
+  async function handleMakeOffer(e) {
+    e.preventDefault()
+    const n = parseFloat(offerPrice)
+    if (!n || n <= 0) { setError('Invalid price'); return }
+    setOfferModal(false); setOfferPrice('')
+    await createOrder('offer', n)
+  }
+
+  async function callOrderAction(endpoint, order_id) {
+    setActionLoading(true); setError('')
+    const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch(`/api/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ order_id }),
+    })
+    const data = await res.json()
+    setActionLoading(false)
+    if (!res.ok) { setError(data.error || 'Action failed'); return false }
+    await loadOrders(ticket, user)
+    return true
+  }
+
+  async function handleAccept(order) {
+    const ok = await callOrderAction('accept-order', order.id)
+    if (ok) setMsg('Order accepted. Waiting for buyer payment.')
+  }
+
+  async function handleReject(order) {
+    const ok = await callOrderAction('reject-order', order.id)
+    if (ok) setMsg('Order rejected.')
+  }
+
+  async function handleCancel() {
+    if (!myOrder) return
+    const ok = await callOrderAction('reject-order', myOrder.id)
+    if (ok) { setMsg('Order canceled.'); setMyOrder(null) }
   }
 
   async function handleViewFile() {
@@ -117,16 +236,16 @@ export default function TicketDetail() {
 
   async function handleSendMessage(e) {
     e.preventDefault()
-    if (!chatMsg.trim()) return
+    if (!chatMsg.trim() || !activeOrder) return
     setChatLoading(true)
-    const receiver_id = isOwner
-      ? (messages.find(m => m.sender_id !== user.id)?.sender_id || null)
-      : ticket.seller_id
-    if (!receiver_id) { setChatLoading(false); return }
-    const { data, error } = await supabase.from('messages').insert({
-      ticket_id: ticket.id, sender_id: user.id, receiver_id, content: chatMsg.trim(),
-    }).select('*, profiles(first_name, last_name, name, avatar_url)').single()
-    if (!error && data) setMessages(m => [...m, data])
+    const receiver_id = user.id === activeOrder.seller_id ? activeOrder.buyer_id : activeOrder.seller_id
+    await supabase.from('messages').insert({
+      order_id: activeOrder.id,
+      ticket_id: activeOrder.ticket_id,
+      sender_id: user.id,
+      receiver_id,
+      content: chatMsg.trim(),
+    })
     setChatMsg('')
     setChatLoading(false)
   }
@@ -136,10 +255,10 @@ export default function TicketDetail() {
     navigate('/dashboard')
   }
 
-  function handleCheckoutSuccess(orderId) {
+  function handleCheckoutSuccess() {
     setCheckoutModal(false)
-    setTicket(t => ({ ...t, status: 'pending' }))
-    setMsg("Payment authorized! Your order is pending review. We'll notify you once approved.")
+    setMsg('✅ Payment successful. The seller has been notified.')
+    loadOrders(ticket, user)
   }
 
   if (loading) return <div className="page-loading">Loading…</div>
@@ -156,6 +275,12 @@ export default function TicketDetail() {
     ? (seller.first_name ? `${seller.first_name} ${seller.last_name || ''}`.trim() : seller.name || seller.email)
     : '—'
 
+  const buyerNameOf = order => {
+    const p = buyerProfiles[order.buyer_id]
+    if (!p) return '—'
+    return p.first_name ? `${p.first_name} ${p.last_name || ''}`.trim() : (p.name || p.email)
+  }
+
   return (
     <div className="page">
       {msg   && <div className="alert alert-success" style={{ marginBottom: '1.25rem' }}>{msg}</div>}
@@ -164,7 +289,6 @@ export default function TicketDetail() {
       <div className="ticket-detail">
         {/* LEFT */}
         <div>
-          {/* Image gallery */}
           {images.length > 0 ? (
             <div>
               <div className="ticket-detail-image"><img src={images[imgIdx]} alt={ticket.title} /></div>
@@ -182,7 +306,6 @@ export default function TicketDetail() {
             <div className="ticket-detail-image"><div className="ticket-detail-no-image">🎟</div></div>
           )}
 
-          {/* Description */}
           {ticket.description && (
             <div style={{ marginTop: '1.5rem' }}>
               <h3 style={{ fontWeight: 600, marginBottom: '.5rem' }}>About this ticket</h3>
@@ -190,24 +313,43 @@ export default function TicketDetail() {
             </div>
           )}
 
-          {/* Offers (seller only) */}
-          {isOwner && offers.length > 0 && (
+          {/* Seller: list of buyer orders */}
+          {isOwner && sellerOrders.length > 0 && (
             <div style={{ marginTop: '1.5rem' }}>
               <h3 style={{ fontWeight: 600, marginBottom: '.75rem' }}>
-                Offers received ({offers.filter(o => o.status === 'pending').length} pending)
+                Orders ({sellerOrders.length})
               </h3>
               <div className="offers-list">
-                {offers.map(o => (
-                  <div key={o.id} className="offer-row">
+                {sellerOrders.map(o => (
+                  <div
+                    key={o.id}
+                    className="offer-row"
+                    style={{
+                      cursor: 'pointer',
+                      outline: o.id === selectedOrderId ? '2px solid var(--accent2)' : 'none',
+                    }}
+                    onClick={() => setSelectedOrderId(o.id)}
+                  >
                     <div>
-                      <span style={{ fontWeight: 700, color: 'var(--accent2)' }}>€{Number(o.offer_price).toFixed(2)}</span>
-                      <span style={{ fontSize: '.8rem', color: 'var(--muted)', marginLeft: '.5rem' }}>{o.status}</span>
-                    </div>
-                    {o.status === 'pending' && canAct && (
-                      <div className="offer-row-actions">
-                        <button className="btn btn-success btn-sm" onClick={() => handleAcceptOffer(o)} disabled={actionLoading}>Accept</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => handleRejectOffer(o)} disabled={actionLoading}>Reject</button>
+                      <div style={{ fontWeight: 600, fontSize: '.9rem' }}>{buyerNameOf(o)}</div>
+                      <div>
+                        <span style={{ fontWeight: 700, color: 'var(--accent2)' }}>€{Number(o.price).toFixed(2)}</span>
+                        <span style={{ fontSize: '.78rem', color: 'var(--muted)', marginLeft: '.5rem' }}>
+                          {o.type === 'offer' ? 'Offer' : 'Buy'} · {o.status}
+                        </span>
                       </div>
+                    </div>
+                    {o.status === 'pending' && (
+                      <div className="offer-row-actions" onClick={e => e.stopPropagation()}>
+                        <button className="btn btn-success btn-sm" onClick={() => handleAccept(o)} disabled={actionLoading}>Accept</button>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleReject(o)} disabled={actionLoading}>Reject</button>
+                      </div>
+                    )}
+                    {o.status === 'accepted' && (
+                      <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>Awaiting payment</span>
+                    )}
+                    {o.status === 'paid' && (
+                      <span style={{ fontSize: '.8rem', color: 'var(--success)', fontWeight: 600 }}>✓ Paid</span>
                     )}
                   </div>
                 ))}
@@ -215,15 +357,15 @@ export default function TicketDetail() {
             </div>
           )}
 
-          {/* Chat */}
-          {user && (
+          {/* Chat — scoped to the active order */}
+          {user && activeOrder && (
             <div style={{ marginTop: '2rem' }}>
               <h3 style={{ fontWeight: 600, marginBottom: '.75rem' }}>
-                {isOwner ? 'Messages' : `Chat with ${sellerName}`}
+                {isOwner ? `Chat with ${buyerNameOf(activeOrder)}` : `Chat with ${sellerName}`}
               </h3>
               <div className="chat-box">
                 {messages.length === 0 ? (
-                  <p style={{ color: 'var(--muted)', fontSize: '.88rem', textAlign: 'center', padding: '1rem' }}>No messages yet. Say hello!</p>
+                  <p style={{ color: 'var(--muted)', fontSize: '.88rem', textAlign: 'center', padding: '1rem' }}>No messages yet.</p>
                 ) : (
                   messages.map(m => {
                     const isMe = m.sender_id === user.id
@@ -241,12 +383,10 @@ export default function TicketDetail() {
                 )}
                 <div ref={chatEndRef} />
               </div>
-              {(isBuyer || (isOwner && messages.length > 0)) && (
-                <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '.5rem', marginTop: '.5rem' }}>
-                  <input value={chatMsg} onChange={e => setChatMsg(e.target.value)} placeholder="Type a message…" style={{ flex: 1 }} />
-                  <button type="submit" className="btn btn-primary" disabled={chatLoading || !chatMsg.trim()}>Send</button>
-                </form>
-              )}
+              <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '.5rem', marginTop: '.5rem' }}>
+                <input value={chatMsg} onChange={e => setChatMsg(e.target.value)} placeholder="Type a message…" style={{ flex: 1 }} />
+                <button type="submit" className="btn btn-primary" disabled={chatLoading || !chatMsg.trim()}>Send</button>
+              </form>
             </div>
           )}
         </div>
@@ -277,39 +417,59 @@ export default function TicketDetail() {
             <div className="ticket-detail-price">€{Number(ticket.price).toFixed(2)}</div>
 
             <div className="ticket-actions">
-              {/* Ticket file — secured */}
+              {/* Ticket file */}
               {ticket.file_url && (isOwner ? (
                 <a href={ticket.file_url} target="_blank" rel="noopener noreferrer" className="btn btn-outline">
                   📄 View ticket file
                 </a>
-              ) : (
+              ) : myOrder?.status === 'paid' ? (
                 <button className="btn btn-outline" onClick={handleViewFile} disabled={fileLoading}>
                   {fileLoading ? 'Loading…' : '📄 View ticket file'}
                 </button>
-              ))}
+              ) : null)}
 
               {isOwner ? (
                 <>
                   <Link to={`/edit/${ticket.id}`} className="btn btn-primary">Edit listing</Link>
                   <button className="btn btn-danger" onClick={handleDelete}>Delete listing</button>
                 </>
-              ) : isBuyer && canAct ? (
-                sellerHasStripe ? (
-                  <>
-                    <button className="btn btn-primary btn-lg" onClick={() => setCheckoutModal(true)}>
-                      Buy now · €{Number(ticket.price).toFixed(2)}
-                    </button>
-                    <button className="btn btn-outline" onClick={() => setOfferModal(true)}>
-                      Make offer
-                    </button>
-                  </>
-                ) : (
-                  <div className="alert alert-error" style={{ marginBottom: 0, textAlign: 'center' }}>
-                    Seller hasn't set up payouts yet.
-                  </div>
-                )
               ) : !user ? (
                 <Link to="/login" className="btn btn-primary btn-lg">Log in to buy</Link>
+              ) : myOrder ? (
+                // ── Buyer with an active order ────────────────────
+                <>
+                  {myOrder.status === 'pending' && (
+                    <>
+                      <div className="alert" style={{ textAlign: 'center', marginBottom: 0, background: 'var(--surface2)' }}>
+                        ⏳ Waiting for seller response
+                      </div>
+                      <button className="btn btn-ghost" onClick={handleCancel} disabled={actionLoading}>Cancel request</button>
+                    </>
+                  )}
+                  {myOrder.status === 'accepted' && (
+                    <>
+                      <button className="btn btn-primary btn-lg" onClick={() => setCheckoutModal(true)}>
+                        Pay €{Number(myOrder.price).toFixed(2)} now
+                      </button>
+                      <button className="btn btn-ghost" onClick={handleCancel} disabled={actionLoading}>Cancel</button>
+                    </>
+                  )}
+                  {myOrder.status === 'paid' && (
+                    <div className="alert alert-success" style={{ textAlign: 'center', marginBottom: 0 }}>
+                      ✅ Paid. Your ticket file is now available.
+                    </div>
+                  )}
+                </>
+              ) : isBuyer && canAct ? (
+                // ── Buyer with no active order ────────────────────
+                <>
+                  <button className="btn btn-primary btn-lg" onClick={handleBuyNow} disabled={actionLoading}>
+                    Buy now · €{Number(ticket.price).toFixed(2)}
+                  </button>
+                  <button className="btn btn-outline" onClick={() => setOfferModal(true)} disabled={actionLoading}>
+                    Make offer
+                  </button>
+                </>
               ) : ticket.status !== 'active' ? (
                 <div className="alert alert-error" style={{ textAlign: 'center', marginBottom: 0 }}>
                   This ticket is no longer available.
@@ -344,9 +504,14 @@ export default function TicketDetail() {
         </div>
       )}
 
-      {/* Stripe checkout modal */}
-      {checkoutModal && (
-        <CheckoutModal ticket={ticket} onClose={() => setCheckoutModal(false)} onSuccess={handleCheckoutSuccess} />
+      {/* Stripe checkout modal — only opens after seller acceptance */}
+      {checkoutModal && myOrder && (
+        <CheckoutModal
+          ticket={ticket}
+          order={myOrder}
+          onClose={() => setCheckoutModal(false)}
+          onSuccess={handleCheckoutSuccess}
+        />
       )}
     </div>
   )
