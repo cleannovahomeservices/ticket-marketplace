@@ -1,4 +1,4 @@
-import { stripe, getSupabaseAdmin, getAuthUser, parseBody, json, CORS } from './_utils.js'
+import { stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS } from './_utils.js'
 
 // Buyer-only cancellation of an order. Sets status to 'rejected'
 // (the allow-list contains no separate 'cancelled' value).
@@ -6,8 +6,8 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS); res.end(); return }
   if (req.method !== 'POST') { json(res, 405, { error: 'Method not allowed' }); return }
 
-  const user = await getAuthUser(req)
-  if (!user) { json(res, 401, { error: 'Unauthorized' }); return }
+  const { user, reason } = await requireUser(req)
+  if (!user) { json(res, 401, { error: 'Unauthorized', reason }); return }
 
   const { order_id } = await parseBody(req)
   if (!order_id) { json(res, 400, { error: 'order_id required' }); return }

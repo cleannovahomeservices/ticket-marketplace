@@ -7,12 +7,14 @@ export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 })
 
 // ── Supabase admin (service role) ─────────────────────────────
+// Falls back to the VITE_-prefixed vars in case only those were set on Vercel.
 export function getSupabaseAdmin() {
-  return createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-    { auth: { persistSession: false } }
-  )
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY
+  if (!url || !serviceKey) {
+    throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars')
+  }
+  return createClient(url, serviceKey, { auth: { persistSession: false } })
 }
 
 // ── CORS headers ───────────────────────────────────────────────
@@ -23,14 +25,33 @@ export const CORS = {
 }
 
 // ── Verify Supabase JWT and return user ───────────────────────
+// Legacy helper kept for backward compatibility.
 export async function getAuthUser(req) {
-  const auth = req.headers['authorization'] || ''
-  const token = auth.replace('Bearer ', '').trim()
-  if (!token) return null
-  const supabase = getSupabaseAdmin()
-  const { data: { user }, error } = await supabase.auth.getUser(token)
-  if (error || !user) return null
+  const { user } = await requireUser(req)
   return user
+}
+
+// New helper that returns a diagnostic reason on failure so callers can
+// surface specific 401 details to the client instead of a black-box
+// "Unauthorized".
+export async function requireUser(req) {
+  const auth = req.headers['authorization'] || req.headers['Authorization'] || ''
+  const token = auth.replace(/^Bearer\s+/i, '').trim()
+  if (!token) return { user: null, reason: 'missing_authorization_header' }
+  let supabase
+  try {
+    supabase = getSupabaseAdmin()
+  } catch (err) {
+    return { user: null, reason: `server_misconfigured: ${err.message}` }
+  }
+  try {
+    const { data, error } = await supabase.auth.getUser(token)
+    if (error) return { user: null, reason: `token_rejected: ${error.message}` }
+    if (!data?.user) return { user: null, reason: 'no_user_for_token' }
+    return { user: data.user, reason: null }
+  } catch (err) {
+    return { user: null, reason: `auth_call_failed: ${err.message}` }
+  }
 }
 
 // ── Read raw request body as Buffer ───────────────────────────

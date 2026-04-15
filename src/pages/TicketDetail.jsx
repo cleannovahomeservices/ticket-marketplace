@@ -240,18 +240,44 @@ export default function TicketDetail() {
 
   async function callOrderAction(endpoint, order_id) {
     setActionLoading(true); setError('')
-    const { data: { session } } = await supabase.auth.getSession()
+
+    // Always refresh the session first so we never send an expired JWT.
+    let { data: { session } } = await supabase.auth.getSession()
     if (!session?.access_token) {
-      setActionLoading(false); setError('You must be logged in'); return false
+      const { data: refreshed } = await supabase.auth.refreshSession()
+      session = refreshed?.session || null
     }
-    const res = await fetch(`/api/${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify({ order_id }),
-    })
-    const data = await res.json().catch(() => ({}))
+    if (!session?.access_token) {
+      setActionLoading(false)
+      setError('You must be logged in. Please sign in again.')
+      return false
+    }
+
+    let res, data
+    try {
+      res = await fetch(`/api/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ order_id }),
+      })
+      data = await res.json().catch(() => ({}))
+    } catch (err) {
+      setActionLoading(false); setError(`Network error: ${err.message}`); return false
+    }
+
     setActionLoading(false)
-    if (!res.ok) { setError(data.error || 'Action failed'); return false }
+
+    if (!res.ok) {
+      // Surface diagnostic info so "Unauthorized" stops being a black box.
+      if (res.status === 401) {
+        setError(`Unauthorized${data.reason ? ` (${data.reason})` : ''}. Try logging out and back in.`)
+      } else if (data.code === 'stripe_not_connected') {
+        setError('You need to connect your Stripe payout account before accepting orders. Open your Dashboard and click "Connect payout account".')
+      } else {
+        setError(data.error || `Action failed (HTTP ${res.status})`)
+      }
+      return false
+    }
     await loadOrders(ticket, user)
     return true
   }
@@ -337,10 +363,17 @@ export default function TicketDetail() {
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
           {/* Seller actions */}
           {isMySellerOrder && activeOrder.status === 'pending' && (
-            <>
-              <button className="btn btn-success btn-sm" onClick={() => handleAccept(activeOrder)} disabled={actionLoading}>Accept</button>
-              <button className="btn btn-danger btn-sm" onClick={() => handleReject(activeOrder)} disabled={actionLoading}>Reject</button>
-            </>
+            seller?.stripe_account_id ? (
+              <>
+                <button className="btn btn-success btn-sm" onClick={() => handleAccept(activeOrder)} disabled={actionLoading}>Accept</button>
+                <button className="btn btn-danger btn-sm" onClick={() => handleReject(activeOrder)} disabled={actionLoading}>Reject</button>
+              </>
+            ) : (
+              <>
+                <Link to="/dashboard" className="btn btn-primary btn-sm">💳 Connect Stripe to accept</Link>
+                <button className="btn btn-danger btn-sm" onClick={() => handleReject(activeOrder)} disabled={actionLoading}>Reject</button>
+              </>
+            )
           )}
           {isMySellerOrder && activeOrder.status === 'accepted' && (
             <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>Awaiting buyer payment</span>

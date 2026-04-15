@@ -1,11 +1,11 @@
-import { stripe, getSupabaseAdmin, getAuthUser, parseBody, json, CORS } from './_utils.js'
+import { stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS } from './_utils.js'
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204, CORS); res.end(); return }
   if (req.method !== 'POST') { json(res, 405, { error: 'Method not allowed' }); return }
 
-  const user = await getAuthUser(req)
-  if (!user) { json(res, 401, { error: 'Unauthorized' }); return }
+  const { user, reason } = await requireUser(req)
+  if (!user) { json(res, 401, { error: 'Unauthorized', reason }); return }
 
   const { order_id } = await parseBody(req)
   if (!order_id) { json(res, 400, { error: 'order_id required' }); return }
@@ -22,7 +22,7 @@ export default async function handler(req, res) {
     .from('profiles').select('stripe_account_id').eq('id', order.seller_id).single()
   const sellerStripeId = seller?.stripe_account_id
   if (!sellerStripeId) {
-    json(res, 400, { error: 'Seller must complete payout setup before accepting' }); return
+    json(res, 400, { error: 'Seller must complete payout setup before accepting', code: 'stripe_not_connected' }); return
   }
 
   let account
@@ -30,7 +30,7 @@ export default async function handler(req, res) {
   catch (err) { json(res, 500, { error: `Stripe account lookup failed: ${err.message}` }); return }
 
   if (!account.charges_enabled || !account.payouts_enabled) {
-    json(res, 400, { error: 'Seller must complete payout setup before accepting' }); return
+    json(res, 400, { error: 'Seller must complete payout setup before accepting', code: 'stripe_not_connected' }); return
   }
 
   const amountCents = Math.round(Number(order.price) * 100)
