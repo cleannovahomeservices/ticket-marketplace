@@ -44,26 +44,7 @@ export default function TicketDetail() {
     : myOrder
   const activeOrderId = activeOrder?.id || null
 
-  useEffect(() => {
-    if (searchParams.get('payment') !== 'success') return
-    setMsg('✅ Payment successful. The seller has been notified.')
-    // Reconcile in case the 3DS redirect bypassed the in-modal
-    // confirm-payment call. Needs myOrder to know which order to
-    // confirm; retry once that's loaded.
-    if (!myOrder?.id) return
-    let cancelled = false
-    ;(async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (cancelled || !session) return
-      await fetch('/api/confirm-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ order_id: myOrder.id }),
-      }).catch(() => {})
-      if (!cancelled) loadOrders(ticket, user)
-    })()
-    return () => { cancelled = true }
-  }, [searchParams, myOrder?.id, ticket, user, loadOrders])
+  const reconcileFiredRef = useRef(false)
 
   // ── Load ticket + seller + orders ─────────────────────────────
   const loadOrders = useCallback(async (ticketRow, currentUser) => {
@@ -119,6 +100,26 @@ export default function TicketDetail() {
     load()
     return () => { active = false }
   }, [id, user, navigate, loadOrders])
+
+  // Reconcile after the 3DS redirect (?payment=success). Fires once
+  // per mount, after myOrder is loaded, so we know which order_id to
+  // confirm. Ref-guarded to avoid re-firing on every order refresh.
+  useEffect(() => {
+    if (searchParams.get('payment') !== 'success') return
+    setMsg('✅ Payment successful. The seller has been notified.')
+    if (!myOrder?.id || reconcileFiredRef.current) return
+    reconcileFiredRef.current = true
+    ;(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      await fetch('/api/confirm-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ order_id: myOrder.id }),
+      }).catch(() => {})
+      if (ticket && user) loadOrders(ticket, user)
+    })()
+  }, [searchParams, myOrder?.id, ticket, user, loadOrders])
 
   // ── Load messages for the active order ────────────────────────
   // IMPORTANT: no profiles(...) join — messages.sender_id FK points to
