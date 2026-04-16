@@ -131,6 +131,7 @@ export default function Dashboard() {
               {connectLoading ? 'Redirecting…' : '💳 Manage payouts'}
             </button>
           )}
+          <Link to="/dashboard/balance" className="btn btn-outline btn-sm">💰 Balance</Link>
           <Link to="/profile" className="btn btn-outline btn-sm">Edit profile</Link>
           <Link to="/create" className="btn btn-primary btn-sm">+ Sell ticket</Link>
           {isAdmin && <Link to="/admin" className="btn btn-dark btn-sm">🛡 Admin panel</Link>}

@@ -56,9 +56,11 @@ export default async function handler(req, res) {
   const amountCents = Math.round(Number(order.price) * 100)
   const platformFee = Math.round(amountCents * PLATFORM_FEE_PCT)
   const sellerNet   = amountCents - platformFee
+  const sellerNetEur = +(sellerNet / 100).toFixed(2)
 
   let transferId = null
   let transferError = null
+  let paidOutAt = null
   try {
     const chargeId = typeof captured.latest_charge === 'string'
       ? captured.latest_charge
@@ -74,17 +76,23 @@ export default async function handler(req, res) {
       },
     })
     transferId = transfer.id
+    paidOutAt = new Date().toISOString()
     console.log(`[admin-approve] ✓ transfer=${transfer.id} amount=${sellerNet} → seller=${sellerStripeId}`)
   } catch (err) {
     // Don't roll back the capture — the admin already decided. Surface
     // the error on the order so an operator can retry the transfer.
+    // seller_amount is still written so the balance page shows the
+    // seller what they're owed while support retries the payout.
     transferError = err.message
     console.error(`[admin-approve] transfer failed:`, err.message)
   }
 
-  // ── 3. Mark the order completed and the ticket sold ──
+  // ── 3. Mark the order completed, record the payout, flag the ticket sold ──
   await supabase.from('orders').update({
     status: 'completed',
+    seller_amount: sellerNetEur,
+    transfer_id: transferId,
+    paid_out_at: paidOutAt,
     updated_at: new Date().toISOString(),
   }).eq('id', order_id)
   await supabase.from('tickets').update({
