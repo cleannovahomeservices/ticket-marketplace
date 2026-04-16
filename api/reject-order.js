@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   if (order.seller_id !== user.id) {
     json(res, 403, { error: 'Only the seller can reject this order' }); return
   }
-  if (order.status !== 'pending_payment') {
+  if (order.status !== 'pending_seller' && order.status !== 'pending_payment') {
     json(res, 400, { error: `Order is ${order.status}, cannot reject` }); return
   }
 

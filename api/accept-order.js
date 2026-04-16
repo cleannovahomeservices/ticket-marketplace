@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     .from('orders').select('*').eq('id', order_id).single()
   if (oErr || !order) { json(res, 404, { error: 'Order not found' }); return }
   if (order.seller_id !== user.id) { json(res, 403, { error: 'Only the seller can accept this order' }); return }
-  if (order.status !== 'pending_payment') { json(res, 400, { error: `Order is ${order.status}, cannot accept` }); return }
+  if (order.status !== 'pending_seller') { json(res, 400, { error: `Order is ${order.status}, cannot accept` }); return }
 
   const amountCents = Math.round(Number(order.price) * 100)
 

@@ -28,7 +28,7 @@ export default function Dashboard() {
         ] = await Promise.all([
           supabase.from('tickets').select('*').eq('seller_id', user.id).order('created_at', { ascending: false }),
           supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('buyer_id', user.id).order('created_at', { ascending: false }),
-          supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('seller_id', user.id).in('status', ['pending_payment','paid_pending_ticket','pending_admin_review','completed']).order('created_at', { ascending: false }),
+          supabase.from('orders').select('*, tickets(title, image_url, image_urls)').eq('seller_id', user.id).in('status', ['pending_seller','pending_payment','paid_pending_ticket','pending_admin_review','completed']).order('created_at', { ascending: false }),
           supabase.from('profiles').select('*').eq('id', user.id).single(),
         ])
         if (!alive) return
@@ -196,6 +196,7 @@ export default function Dashboard() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
                     <span className="order-price">€{Number(order.price).toFixed(2)}</span>
+                    {order.status === 'pending_seller'       && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>📩 Offer — respond</span>}
                     {order.status === 'pending_payment'      && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Awaiting payment</span>}
                     {order.status === 'paid_pending_ticket'  && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>📤 Upload ticket</span>}
                     {order.status === 'pending_admin_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 Ticket under review</span>}
@@ -230,6 +231,7 @@ export default function Dashboard() {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
                     <span className="order-price">€{Number(order.price).toFixed(2)}</span>
+                    {order.status === 'pending_seller'       && <span style={{ color: 'var(--muted)',   fontWeight: 600, fontSize: '.85rem' }}>⏳ Waiting for seller</span>}
                     {order.status === 'pending_payment'      && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Pay now</span>}
                     {order.status === 'paid_pending_ticket'  && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⏳ Waiting for seller to upload</span>}
                     {order.status === 'pending_admin_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 Waiting for admin approval</span>}

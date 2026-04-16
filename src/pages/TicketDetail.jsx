@@ -6,7 +6,7 @@ import FavoriteButton from '../components/FavoriteButton'
 import CheckoutModal from '../components/CheckoutModal'
 
 const CATEGORY_EMOJI = { concerts: '🎵', sports: '⚽', travel: '✈️', events: '🎉', experiences: '🌟' }
-const ACTIVE_STATUSES = ['pending_payment', 'paid_pending_ticket', 'pending_admin_review', 'completed']
+const ACTIVE_STATUSES = ['pending_seller', 'pending_payment', 'paid_pending_ticket', 'pending_admin_review', 'completed']
 
 export default function TicketDetail() {
   const { id } = useParams()
@@ -194,13 +194,17 @@ export default function TicketDetail() {
   async function createOrder(type, price) {
     if (!user) { navigate('/login'); return }
     setActionLoading(true); setError('')
+    // Offers must be accepted by the seller before the buyer can pay —
+    // otherwise the buyer could set any price and self-accept. Only
+    // Buy-now (list price) goes straight to `pending_payment`.
+    const initialStatus = type === 'offer' ? 'pending_seller' : 'pending_payment'
     const { data, error: insErr } = await supabase.from('orders').insert({
       ticket_id: ticket.id,
       buyer_id: user.id,
       seller_id: ticket.seller_id,
       price,
       type,
-      status: 'pending_payment',
+      status: initialStatus,
     }).select().single()
     if (insErr || !data?.id) {
       setError(insErr?.message || 'Failed to create order')
@@ -443,6 +447,24 @@ export default function TicketDetail() {
           {activeOrder.status.replace(/_/g, ' ')}
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* pending_seller ─────────────────────────────────────── */}
+          {isMySellerOrder && activeOrder.status === 'pending_seller' && (
+            <>
+              <button className="btn btn-success btn-sm" onClick={() => handleAccept(activeOrder)} disabled={actionLoading}>
+                ✓ Accept
+              </button>
+              <button className="btn btn-danger btn-sm" onClick={() => handleReject(activeOrder)} disabled={actionLoading}>
+                ✗ Reject
+              </button>
+            </>
+          )}
+          {isMyBuyerOrder && activeOrder.status === 'pending_seller' && (
+            <>
+              <span style={{ fontSize: '.8rem', color: 'var(--muted)', fontWeight: 600 }}>⏳ Waiting for seller to respond</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => handleCancel(activeOrder)} disabled={actionLoading}>Cancel</button>
+            </>
+          )}
+
           {/* pending_payment ─────────────────────────────────────── */}
           {isMyBuyerOrder && activeOrder.status === 'pending_payment' && (
             <>
@@ -626,6 +648,7 @@ export default function TicketDetail() {
                 <Link to="/login" className="btn btn-primary btn-lg">Log in to buy</Link>
               ) : myOrder ? (
                 <div className="alert" style={{ textAlign: 'center', marginBottom: 0, background: 'var(--surface2)' }}>
+                  {myOrder.status === 'pending_seller'       && '⏳ Offer sent — waiting for the seller to accept'}
                   {myOrder.status === 'pending_payment'      && '💳 Pay in the chat below to confirm your ticket'}
                   {myOrder.status === 'paid_pending_ticket'  && '⏳ Waiting for seller to upload the ticket'}
                   {myOrder.status === 'pending_admin_review' && '🛡 Waiting for admin approval'}

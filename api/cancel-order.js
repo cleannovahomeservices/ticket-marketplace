@@ -19,7 +19,7 @@ export default async function handler(req, res) {
   if (order.buyer_id !== user.id) {
     json(res, 403, { error: 'Only the buyer can cancel this order' }); return
   }
-  if (order.status !== 'pending_payment') {
+  if (order.status !== 'pending_seller' && order.status !== 'pending_payment') {
     json(res, 400, { error: `Order is ${order.status}, cannot cancel` }); return
   }
 
