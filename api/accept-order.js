@@ -1,4 +1,7 @@
-import { stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS } from './_utils.js'
+import {
+  stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS,
+  asUuid, idempotencyKey, rateLimit, logAudit,
+} from './_utils.js'
 
 // Seller accepts a pending order. Creates a platform-controlled
 // manual-capture PaymentIntent (no on_behalf_of / transfer_data — the
@@ -11,13 +14,19 @@ export default async function handler(req, res) {
   const { user, reason } = await requireUser(req)
   if (!user) { json(res, 401, { error: 'Unauthorized', reason }); return }
 
-  const { order_id } = await parseBody(req)
-  if (!order_id) { json(res, 400, { error: 'order_id required' }); return }
+  let orderId
+  try {
+    const body = await parseBody(req)
+    orderId = asUuid(body.order_id, 'order_id')
+  } catch (err) { json(res, err.statusCode || 400, { error: err.message }); return }
+
+  const rl = await rateLimit({ subject: user.id, action: 'accept_order', limit: 30, windowSeconds: 60 })
+  if (!rl.allowed) { json(res, 429, { error: 'Too many accepts — slow down.' }); return }
 
   const supabase = getSupabaseAdmin()
 
   const { data: order, error: oErr } = await supabase
-    .from('orders').select('*').eq('id', order_id).single()
+    .from('orders').select('*').eq('id', orderId).single()
   if (oErr || !order) { json(res, 404, { error: 'Order not found' }); return }
   if (order.seller_id !== user.id) { json(res, 403, { error: 'Only the seller can accept this order' }); return }
   if (order.status !== 'pending_seller') { json(res, 400, { error: `Order is ${order.status}, cannot accept` }); return }
@@ -37,7 +46,7 @@ export default async function handler(req, res) {
         buyer_id: order.buyer_id,
         seller_id: order.seller_id,
       },
-    })
+    }, { idempotencyKey: idempotencyKey('pi_accept', order.id, amountCents) })
   } catch (err) {
     console.error(`[accept-order] PI create failed:`, err.message)
     json(res, 500, { error: err.message }); return
@@ -84,5 +93,13 @@ export default async function handler(req, res) {
   }
 
   console.log(`[accept-order] ✓ order=${order.id} accepted, pi=${paymentIntent.id}`)
+  await logAudit({
+    userId: user.id,
+    action: 'order_accept',
+    targetType: 'order',
+    targetId: order.id,
+    metadata: { pi_id: paymentIntent.id, amount_cents: amountCents },
+    req,
+  })
   json(res, 200, { success: true, order_id: order.id })
 }

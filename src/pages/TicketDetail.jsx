@@ -195,28 +195,22 @@ export default function TicketDetail() {
   async function createOrder(type, price) {
     if (!user) { navigate('/login'); return }
     setActionLoading(true); setError('')
-    // Offers must be accepted by the seller before the buyer can pay —
-    // otherwise the buyer could set any price and self-accept. Only
-    // Buy-now (list price) goes straight to `pending_payment`.
-    const initialStatus = type === 'offer' ? 'pending_seller' : 'pending_payment'
-    const { data, error: insErr } = await supabase.from('orders').insert({
-      ticket_id: ticket.id,
-      buyer_id: user.id,
-      seller_id: ticket.seller_id,
-      price,
-      type,
-      status: initialStatus,
-    }).select().single()
-    if (insErr || !data?.id) {
-      setError(insErr?.message || 'Failed to create order')
-      setActionLoading(false)
-      return
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { setError('You must be logged in.'); setActionLoading(false); return }
+      const res = await fetch('/api/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ ticket_id: ticket.id, type, price }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || 'Failed to create order'); setActionLoading(false); return }
+      // Server inserted the initial message; no need to send another.
+      setMyOrder(data.order)
+      setMsg(type === 'buy' ? 'Buy request sent. Waiting for seller response.' : 'Offer sent.')
+    } catch (err) {
+      setError('Network error creating order.')
     }
-    await sendOrderMessage(data, type === 'buy'
-      ? `🛒 Buy request placed at €${Number(price).toFixed(2)}.`
-      : `💬 New offer: €${Number(price).toFixed(2)}.`)
-    setMyOrder(data)
-    setMsg(type === 'buy' ? 'Buy request sent. Waiting for seller response.' : 'Offer sent.')
     setActionLoading(false)
   }
 

@@ -1,4 +1,7 @@
-import { stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS } from './_utils.js'
+import {
+  stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS,
+  asUuid, logAudit,
+} from './_utils.js'
 
 // Called by the client right after stripe.confirmPayment() resolves
 // successfully. Defensive: does NOT trust the client — retrieves the
@@ -15,12 +18,15 @@ export default async function handler(req, res) {
   const { user, reason } = await requireUser(req)
   if (!user) { json(res, 401, { error: 'Unauthorized', reason }); return }
 
-  const { order_id } = await parseBody(req)
-  if (!order_id) { json(res, 400, { error: 'order_id required' }); return }
+  let orderId
+  try {
+    const body = await parseBody(req)
+    orderId = asUuid(body.order_id, 'order_id')
+  } catch (err) { json(res, err.statusCode || 400, { error: err.message }); return }
 
   const supabase = getSupabaseAdmin()
   const { data: order, error } = await supabase
-    .from('orders').select('*').eq('id', order_id).single()
+    .from('orders').select('*').eq('id', orderId).single()
   if (error || !order) { json(res, 404, { error: 'Order not found' }); return }
   if (order.buyer_id !== user.id) { json(res, 403, { error: 'Not allowed' }); return }
   if (!order.stripe_payment_intent_id) {
@@ -74,5 +80,13 @@ export default async function handler(req, res) {
     content: '💳 Payment received. Upload the ticket to continue.',
   }).catch(err => console.error('[confirm-payment] message insert failed:', err.message))
 
+  await logAudit({
+    userId: user.id,
+    action: 'payment_confirm',
+    targetType: 'order',
+    targetId: order.id,
+    metadata: { pi_id: pi.id, pi_status: pi.status, next_status: nextStatus },
+    req,
+  })
   json(res, 200, { success: true, order_status: nextStatus })
 }

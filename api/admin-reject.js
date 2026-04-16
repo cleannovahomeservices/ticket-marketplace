@@ -1,4 +1,7 @@
-import { stripe, getSupabaseAdmin, requireAdmin, parseBody, json, CORS } from './_utils.js'
+import {
+  stripe, getSupabaseAdmin, requireAdmin, parseBody, json, CORS,
+  asUuid, idempotencyKey, logAudit, isAllowedAdminEmail,
+} from './_utils.js'
 
 // Admin-only. Cancels the uncaptured PaymentIntent (or refunds if it was
 // already captured for any reason), transitions the order to `rejected`,
@@ -10,13 +13,20 @@ export default async function handler(req, res) {
   const { user, profile, reason } = await requireAdmin(req)
   if (!user) { json(res, 401, { error: 'Unauthorized', reason }); return }
   if (!profile) { json(res, 403, { error: 'Forbidden', reason }); return }
+  if (!isAllowedAdminEmail(user.email)) {
+    await logAudit({ userId: user.id, action: 'admin_email_denied', metadata: { email: user.email }, req })
+    json(res, 403, { error: 'Admin email not allow-listed' }); return
+  }
 
-  const { order_id } = await parseBody(req)
-  if (!order_id) { json(res, 400, { error: 'order_id required' }); return }
+  let orderId
+  try {
+    const body = await parseBody(req)
+    orderId = asUuid(body.order_id, 'order_id')
+  } catch (err) { json(res, err.statusCode || 400, { error: err.message }); return }
 
   const supabase = getSupabaseAdmin()
   const { data: order } = await supabase
-    .from('orders').select('*').eq('id', order_id).single()
+    .from('orders').select('*').eq('id', orderId).single()
   if (!order) { json(res, 404, { error: 'Order not found' }); return }
   if (!['paid_pending_ticket', 'pending_admin_review'].includes(order.status)) {
     json(res, 400, { error: `Order is ${order.status}, cannot reject` }); return
@@ -24,11 +34,18 @@ export default async function handler(req, res) {
 
   if (order.stripe_payment_intent_id) {
     try {
-      await stripe.paymentIntents.cancel(order.stripe_payment_intent_id)
+      await stripe.paymentIntents.cancel(
+        order.stripe_payment_intent_id,
+        undefined,
+        { idempotencyKey: idempotencyKey('pi_cancel', order.id) },
+      )
     } catch {
       // PI may already be captured in edge cases — refund instead.
       try {
-        await stripe.refunds.create({ payment_intent: order.stripe_payment_intent_id })
+        await stripe.refunds.create(
+          { payment_intent: order.stripe_payment_intent_id },
+          { idempotencyKey: idempotencyKey('refund', order.id) },
+        )
       } catch (err2) {
         json(res, 500, { error: `Cancel/refund failed: ${err2.message}` }); return
       }
@@ -37,11 +54,20 @@ export default async function handler(req, res) {
 
   await supabase.from('orders').update({
     status: 'rejected', updated_at: new Date().toISOString(),
-  }).eq('id', order_id)
+  }).eq('id', orderId)
   await supabase.from('tickets').update({
     status: 'active',
     reserved_by: null,
   }).eq('id', order.ticket_id)
+
+  await logAudit({
+    userId: user.id,
+    action: 'admin_reject',
+    targetType: 'order',
+    targetId: order.id,
+    metadata: { prev_status: order.status, pi_id: order.stripe_payment_intent_id },
+    req,
+  })
 
   await supabase.from('messages').insert({
     order_id: order.id,

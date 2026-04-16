@@ -1,4 +1,4 @@
-import { getSupabaseAdmin, requireUser, json, CORS } from './_utils.js'
+import { getSupabaseAdmin, requireUser, json, CORS, asUuid, rateLimit, logAudit } from './_utils.js'
 
 // Serves signed URLs for the order-scoped ticket file uploaded by the
 // seller. Enforces the visibility rules from the spec:
@@ -16,13 +16,18 @@ export default async function handler(req, res) {
   if (!user) { json(res, 401, { error: 'Unauthorized', reason }); return }
 
   const url = new URL(req.url, `http://${req.headers.host}`)
-  const order_id = url.searchParams.get('order_id')
-  if (!order_id) { json(res, 400, { error: 'order_id required' }); return }
+  let orderId
+  try {
+    orderId = asUuid(url.searchParams.get('order_id'), 'order_id')
+  } catch (err) { json(res, err.statusCode || 400, { error: err.message }); return }
+
+  const rl = await rateLimit({ subject: user.id, action: 'ticket_file', limit: 30, windowSeconds: 60 })
+  if (!rl.allowed) { json(res, 429, { error: 'Too many requests.' }); return }
 
   const supabase = getSupabaseAdmin()
   const { data: order } = await supabase
     .from('orders').select('id, buyer_id, seller_id, status, ticket_file_url')
-    .eq('id', order_id).single()
+    .eq('id', orderId).single()
   if (!order) { json(res, 404, { error: 'Order not found' }); return }
   if (!order.ticket_file_url) { json(res, 404, { error: 'No ticket uploaded yet' }); return }
 
@@ -36,6 +41,7 @@ export default async function handler(req, res) {
   else if (user.id === order.buyer_id && order.status === 'completed') allowed = true
 
   if (!allowed) {
+    await logAudit({ userId: user.id, action: 'ticket_file_denied', targetType: 'order', targetId: order.id, metadata: { status: order.status }, req })
     json(res, 403, { error: 'Access denied. Ticket is only visible after admin approval.' })
     return
   }
@@ -45,5 +51,6 @@ export default async function handler(req, res) {
     .createSignedUrl(order.ticket_file_url, 60 * 10) // 10 min
   if (sErr) { json(res, 500, { error: `Sign URL failed: ${sErr.message}` }); return }
 
+  await logAudit({ userId: user.id, action: 'ticket_file_signed', targetType: 'order', targetId: order.id, req })
   json(res, 200, { url: signed.signedUrl })
 }

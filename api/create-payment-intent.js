@@ -1,4 +1,7 @@
-import { stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS } from './_utils.js'
+import {
+  stripe, getSupabaseAdmin, requireUser, parseBody, json, CORS,
+  asUuid, idempotencyKey, rateLimit, logAudit,
+} from './_utils.js'
 
 // Buyer-only. Lazily creates a platform-controlled manual-capture
 // PaymentIntent for a pending_payment order. Funds are charged to the
@@ -18,12 +21,18 @@ export default async function handler(req, res) {
   const { user, reason } = await requireUser(req)
   if (!user) { json(res, 401, { error: 'Unauthorized', reason }); return }
 
-  const { order_id } = await parseBody(req)
-  if (!order_id) { json(res, 400, { error: 'order_id required' }); return }
+  let orderId
+  try {
+    const body = await parseBody(req)
+    orderId = asUuid(body.order_id, 'order_id')
+  } catch (err) { json(res, err.statusCode || 400, { error: err.message }); return }
+
+  const rl = await rateLimit({ subject: user.id, action: 'create_pi', limit: 10, windowSeconds: 60 })
+  if (!rl.allowed) { json(res, 429, { error: 'Too many payment attempts — wait a moment.' }); return }
 
   const supabase = getSupabaseAdmin()
   const { data: order, error } = await supabase
-    .from('orders').select('*').eq('id', order_id).single()
+    .from('orders').select('*').eq('id', orderId).single()
   if (error || !order) { json(res, 404, { error: 'Order not found' }); return }
   if (order.buyer_id !== user.id) { json(res, 403, { error: 'Not allowed' }); return }
   if (order.status !== 'pending_payment') {
@@ -88,9 +97,13 @@ export default async function handler(req, res) {
         buyer_id: order.buyer_id,
         seller_id: order.seller_id,
       },
+    }, {
+      // Prevents duplicate PIs if the client retries within 24h.
+      idempotencyKey: idempotencyKey('pi_create', order.id, amountCents),
     })
   } catch (err) {
     console.error(`[create-pi] create failed for order=${order.id}:`, err.message)
+    await logAudit({ userId: user.id, action: 'pi_create_failed', targetType: 'order', targetId: order.id, metadata: { error: err.message }, req })
     json(res, 500, { error: err.message }); return
   }
 
@@ -105,5 +118,13 @@ export default async function handler(req, res) {
   }
 
   console.log(`[create-pi] ✓ linked pi=${pi.id} → order=${order.id}  amount=${amountCents}  (platform-held, no transfer_data)`)
+  await logAudit({
+    userId: user.id,
+    action: 'pi_create',
+    targetType: 'order',
+    targetId: order.id,
+    metadata: { pi_id: pi.id, amount_cents: amountCents },
+    req,
+  })
   json(res, 200, { client_secret: pi.client_secret, order_id: order.id })
 }

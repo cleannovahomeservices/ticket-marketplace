@@ -1,4 +1,7 @@
-import { stripe, getSupabaseAdmin, requireAdmin, parseBody, json, CORS } from './_utils.js'
+import {
+  stripe, getSupabaseAdmin, requireAdmin, parseBody, json, CORS,
+  asUuid, idempotencyKey, logAudit, isAllowedAdminEmail,
+} from './_utils.js'
 
 const PLATFORM_FEE_PCT = 0.05
 
@@ -14,13 +17,20 @@ export default async function handler(req, res) {
   const { user, profile, reason } = await requireAdmin(req)
   if (!user) { json(res, 401, { error: 'Unauthorized', reason }); return }
   if (!profile) { json(res, 403, { error: 'Forbidden', reason }); return }
+  if (!isAllowedAdminEmail(user.email)) {
+    await logAudit({ userId: user.id, action: 'admin_email_denied', metadata: { email: user.email }, req })
+    json(res, 403, { error: 'Admin email not allow-listed' }); return
+  }
 
-  const { order_id } = await parseBody(req)
-  if (!order_id) { json(res, 400, { error: 'order_id required' }); return }
+  let orderId
+  try {
+    const body = await parseBody(req)
+    orderId = asUuid(body.order_id, 'order_id')
+  } catch (err) { json(res, err.statusCode || 400, { error: err.message }); return }
 
   const supabase = getSupabaseAdmin()
   const { data: order } = await supabase
-    .from('orders').select('*').eq('id', order_id).single()
+    .from('orders').select('*').eq('id', orderId).single()
   if (!order) { json(res, 404, { error: 'Order not found' }); return }
   if (order.status !== 'pending_admin_review') {
     json(res, 400, { error: `Order is ${order.status}, cannot approve` }); return
@@ -45,7 +55,11 @@ export default async function handler(req, res) {
   // ── 1. Capture the held funds into the platform account ──
   let captured
   try {
-    captured = await stripe.paymentIntents.capture(order.stripe_payment_intent_id)
+    captured = await stripe.paymentIntents.capture(
+      order.stripe_payment_intent_id,
+      undefined,
+      { idempotencyKey: idempotencyKey('pi_capture', order.id) },
+    )
     console.log(`[admin-approve] ✓ captured pi=${captured.id} status=${captured.status}`)
   } catch (err) {
     console.error(`[admin-approve] capture failed:`, err.message)
@@ -74,7 +88,7 @@ export default async function handler(req, res) {
         order_id: order.id,
         payment_intent_id: captured.id,
       },
-    })
+    }, { idempotencyKey: idempotencyKey('transfer', order.id, sellerNet) })
     transferId = transfer.id
     paidOutAt = new Date().toISOString()
     console.log(`[admin-approve] ✓ transfer=${transfer.id} amount=${sellerNet} → seller=${sellerStripeId}`)
@@ -94,11 +108,26 @@ export default async function handler(req, res) {
     transfer_id: transferId,
     paid_out_at: paidOutAt,
     updated_at: new Date().toISOString(),
-  }).eq('id', order_id)
+  }).eq('id', orderId)
   await supabase.from('tickets').update({
     status: 'sold',
     reserved_by: null,
   }).eq('id', order.ticket_id)
+
+  await logAudit({
+    userId: user.id,
+    action: 'admin_approve',
+    targetType: 'order',
+    targetId: order.id,
+    metadata: {
+      pi_id: captured.id,
+      transfer_id: transferId,
+      transfer_error: transferError,
+      seller_amount_eur: sellerNetEur,
+      seller_stripe_id: sellerStripeId,
+    },
+    req,
+  })
 
   await supabase.from('messages').insert({
     order_id: order.id,
