@@ -61,7 +61,17 @@ export default async function handler(req, res) {
     .eq('status', 'pending_payment')
     .neq('id', order.id)
 
-  await supabase.from('tickets').update({ status: 'pending' }).eq('id', order.ticket_id)
+  // Reserve the ticket for this buyer (atomic — blocks double-selling).
+  const { data: reserved } = await supabase.from('tickets')
+    .update({ status: 'reserved', reserved_by: order.buyer_id })
+    .eq('id', order.ticket_id)
+    .or(`status.eq.active,and(status.eq.reserved,reserved_by.eq.${order.buyer_id})`)
+    .select('id')
+  if (!reserved || reserved.length === 0) {
+    await stripe.paymentIntents.cancel(paymentIntent.id).catch(() => {})
+    await supabase.from('orders').update({ status: 'rejected', updated_at: new Date().toISOString() }).eq('id', order.id)
+    json(res, 409, { error: 'This ticket is already reserved by another buyer.' }); return
+  }
 
   if (order.id) {
     await supabase.from('messages').insert({

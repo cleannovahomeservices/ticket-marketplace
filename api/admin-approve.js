@@ -29,6 +29,19 @@ export default async function handler(req, res) {
     json(res, 400, { error: 'No payment intent on this order' }); return
   }
 
+  // ── 0. Validate the seller can actually receive the transfer ──
+  // Refuse to capture if the seller has no Stripe Connect account — we
+  // would otherwise take the buyer's money with no way to pay out.
+  const { data: seller } = await supabase
+    .from('profiles').select('stripe_account_id').eq('id', order.seller_id).single()
+  const sellerStripeId = seller?.stripe_account_id || null
+  if (!sellerStripeId) {
+    json(res, 400, {
+      error: 'Seller has no Stripe account connected — cannot transfer funds. Ask the seller to connect their payout account before approving.',
+      code: 'seller_not_connected',
+    }); return
+  }
+
   // ── 1. Capture the held funds into the platform account ──
   let captured
   try {
@@ -40,51 +53,44 @@ export default async function handler(req, res) {
   }
 
   // ── 2. Transfer the seller's net amount to their connected account ──
-  // If the seller has no connected account we still capture (admin made
-  // the decision), flag the order for manual payout, and return success.
-  const { data: seller } = await supabase
-    .from('profiles').select('stripe_account_id').eq('id', order.seller_id).single()
-  const sellerStripeId = seller?.stripe_account_id || null
-
   const amountCents = Math.round(Number(order.price) * 100)
   const platformFee = Math.round(amountCents * PLATFORM_FEE_PCT)
   const sellerNet   = amountCents - platformFee
 
   let transferId = null
   let transferError = null
-  if (sellerStripeId) {
-    try {
-      const chargeId = typeof captured.latest_charge === 'string'
-        ? captured.latest_charge
-        : captured.latest_charge?.id
-      const transfer = await stripe.transfers.create({
-        amount: sellerNet,
-        currency: 'eur',
-        destination: sellerStripeId,
-        ...(chargeId ? { source_transaction: chargeId } : {}),
-        metadata: {
-          order_id: order.id,
-          payment_intent_id: captured.id,
-        },
-      })
-      transferId = transfer.id
-      console.log(`[admin-approve] ✓ transfer=${transfer.id} amount=${sellerNet} → seller=${sellerStripeId}`)
-    } catch (err) {
-      // Don't roll back the capture — the admin already decided. Surface
-      // the error on the order so an operator can retry the transfer.
-      transferError = err.message
-      console.error(`[admin-approve] transfer failed:`, err.message)
-    }
-  } else {
-    console.warn(`[admin-approve] seller ${order.seller_id} has no stripe_account_id — skipping transfer`)
+  try {
+    const chargeId = typeof captured.latest_charge === 'string'
+      ? captured.latest_charge
+      : captured.latest_charge?.id
+    const transfer = await stripe.transfers.create({
+      amount: sellerNet,
+      currency: 'eur',
+      destination: sellerStripeId,
+      ...(chargeId ? { source_transaction: chargeId } : {}),
+      metadata: {
+        order_id: order.id,
+        payment_intent_id: captured.id,
+      },
+    })
+    transferId = transfer.id
+    console.log(`[admin-approve] ✓ transfer=${transfer.id} amount=${sellerNet} → seller=${sellerStripeId}`)
+  } catch (err) {
+    // Don't roll back the capture — the admin already decided. Surface
+    // the error on the order so an operator can retry the transfer.
+    transferError = err.message
+    console.error(`[admin-approve] transfer failed:`, err.message)
   }
 
-  // ── 3. Mark the order / ticket as completed ──
+  // ── 3. Mark the order completed and the ticket sold ──
   await supabase.from('orders').update({
     status: 'completed',
     updated_at: new Date().toISOString(),
   }).eq('id', order_id)
-  await supabase.from('tickets').update({ status: 'completed' }).eq('id', order.ticket_id)
+  await supabase.from('tickets').update({
+    status: 'sold',
+    reserved_by: null,
+  }).eq('id', order.ticket_id)
 
   await supabase.from('messages').insert({
     order_id: order.id,
@@ -98,6 +104,5 @@ export default async function handler(req, res) {
     success: true,
     transfer_id: transferId,
     transfer_error: transferError,
-    payout_pending: !sellerStripeId,
   })
 }

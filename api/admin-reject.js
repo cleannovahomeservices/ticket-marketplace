@@ -38,7 +38,10 @@ export default async function handler(req, res) {
   await supabase.from('orders').update({
     status: 'rejected', updated_at: new Date().toISOString(),
   }).eq('id', order_id)
-  await supabase.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id)
+  await supabase.from('tickets').update({
+    status: 'active',
+    reserved_by: null,
+  }).eq('id', order.ticket_id)
 
   await supabase.from('messages').insert({
     order_id: order.id,

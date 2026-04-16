@@ -103,9 +103,9 @@ export default async function handler(req, res) {
         const ok = await setStatus(order, 'completed')
         if (ok) {
           const { error: tErr } = await supabase.from('tickets')
-            .update({ status: 'completed' }).eq('id', order.ticket_id)
+            .update({ status: 'sold', reserved_by: null }).eq('id', order.ticket_id)
           if (tErr) console.error(`[webhook] ticket status update failed:`, tErr.message)
-          else console.log(`[webhook] ✓ ticket=${order.ticket_id} status → completed`)
+          else console.log(`[webhook] ✓ ticket=${order.ticket_id} status → sold`)
         }
       } else {
         console.log(`[webhook]   order=${order.id} already completed — no-op`)
@@ -135,7 +135,7 @@ export default async function handler(req, res) {
       const ok = await setStatus(order, 'rejected')
       if (ok) {
         const { error: tErr } = await supabase.from('tickets')
-          .update({ status: 'active' }).eq('id', order.ticket_id)
+          .update({ status: 'active', reserved_by: null }).eq('id', order.ticket_id)
         if (tErr) console.error(`[webhook] ticket status update failed:`, tErr.message)
         else console.log(`[webhook] ✓ ticket=${order.ticket_id} status → active`)
       }

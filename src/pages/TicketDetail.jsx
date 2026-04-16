@@ -640,6 +640,14 @@ export default function TicketDetail() {
                     Make offer
                   </button>
                 </>
+              ) : ticket.status === 'reserved' ? (
+                <div className="alert" style={{ textAlign: 'center', marginBottom: 0, background: 'rgba(245,158,11,.15)', color: '#fcd34d' }}>
+                  🔒 Reserved — another buyer is completing the purchase.
+                </div>
+              ) : ticket.status === 'sold' ? (
+                <div className="alert alert-error" style={{ textAlign: 'center', marginBottom: 0 }}>
+                  ✓ Sold — this ticket is no longer available.
+                </div>
               ) : ticket.status !== 'active' ? (
                 <div className="alert alert-error" style={{ textAlign: 'center', marginBottom: 0 }}>
                   This ticket is no longer available.

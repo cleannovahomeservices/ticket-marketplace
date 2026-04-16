@@ -30,6 +30,26 @@ export default async function handler(req, res) {
     json(res, 400, { error: `Order is ${order.status}, cannot pay` }); return
   }
 
+  // ── Atomically reserve the ticket for this buyer ──
+  // Succeeds only if the ticket is `active` or already `reserved` by the
+  // same buyer (allows the buyer to retry their own payment). Any other
+  // state — reserved by someone else, sold, completed — blocks the sale
+  // and prevents double-selling.
+  const { data: reserved, error: resErr } = await supabase
+    .from('tickets')
+    .update({ status: 'reserved', reserved_by: order.buyer_id })
+    .eq('id', order.ticket_id)
+    .or(`status.eq.active,and(status.eq.reserved,reserved_by.eq.${order.buyer_id})`)
+    .select('id')
+  if (resErr) {
+    console.error(`[create-pi] reserve failed for ticket=${order.ticket_id}:`, resErr.message)
+    json(res, 500, { error: resErr.message }); return
+  }
+  if (!reserved || reserved.length === 0) {
+    console.warn(`[create-pi] ticket=${order.ticket_id} not available for buyer=${order.buyer_id}`)
+    json(res, 409, { error: 'This ticket is no longer available.' }); return
+  }
+
   const REUSABLE = new Set(['requires_payment_method', 'requires_confirmation', 'requires_action'])
 
   if (order.stripe_payment_intent_id) {

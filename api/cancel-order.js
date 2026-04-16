@@ -35,7 +35,9 @@ export default async function handler(req, res) {
   const { data: remaining } = await supabase
     .from('orders').select('id').eq('ticket_id', order.ticket_id).in('status', ['pending_payment','paid_pending_ticket','pending_admin_review','completed'])
   if (!remaining || remaining.length === 0) {
-    await supabase.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id)
+    await supabase.from('tickets')
+      .update({ status: 'active', reserved_by: null })
+      .eq('id', order.ticket_id)
   }
 
   if (order.id) {
