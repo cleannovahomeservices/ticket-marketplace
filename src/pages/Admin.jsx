@@ -29,10 +29,14 @@ export default function Admin() {
   }, [authLoading, user, isAdmin])
 
   async function fetchOrders() {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('orders')
-      .select('*, tickets(title, image_urls, image_url, category, event_date, location), profiles!orders_buyer_id_fkey(first_name, last_name, email), seller:profiles!orders_seller_id_fkey(first_name, last_name, email)')
+      .select('*, tickets(title, image_urls, image_url, category, event_date, location), profiles!orders_buyer_profile_fkey(first_name, last_name, email), seller:profiles!orders_seller_profile_fkey(first_name, last_name, email)')
       .order('created_at', { ascending: false })
+    if (error) {
+      console.error('[admin] fetchOrders failed:', error)
+      setErr(`Could not load orders: ${error.message}`)
+    }
     setOrders(data || [])
     setLoading(false)
   }

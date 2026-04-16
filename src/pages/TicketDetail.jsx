@@ -352,6 +352,15 @@ export default function TicketDetail() {
     })
 
     const { data: { session } } = await supabase.auth.getSession()
+    // Check the server-side order status after a failed/timeout response —
+    // the upload often succeeds on the backend (file stored, order flipped
+    // to pending_admin_review) but the HTTP response is cut by a timeout.
+    // If that happened, treat it as success instead of scaring the user.
+    async function checkServerState() {
+      const { data: fresh } = await supabase
+        .from('orders').select('status, ticket_file_url').eq('id', activeOrder.id).single()
+      return fresh && fresh.ticket_file_url && fresh.status === 'pending_admin_review'
+    }
     try {
       const res = await fetch('/api/upload-ticket', {
         method: 'POST',
@@ -364,11 +373,25 @@ export default function TicketDetail() {
         }),
       })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) { setError(data.error || 'Upload failed'); setUploadLoading(false); return }
+      if (!res.ok) {
+        if (await checkServerState()) {
+          setMsg('Ticket uploaded. Admin will review it shortly.')
+          await loadOrders(ticket, user)
+        } else {
+          setError(data.error || 'Upload failed')
+        }
+        setUploadLoading(false)
+        return
+      }
       setMsg('Ticket uploaded. Admin will review it shortly.')
       await loadOrders(ticket, user)
     } catch (err) {
-      setError(`Upload failed: ${err.message}`)
+      if (await checkServerState()) {
+        setMsg('Ticket uploaded. Admin will review it shortly.')
+        await loadOrders(ticket, user)
+      } else {
+        setError(`Upload failed: ${err.message}`)
+      }
     }
     setUploadLoading(false)
   }

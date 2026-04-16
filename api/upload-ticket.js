@@ -1,5 +1,11 @@
 import { getSupabaseAdmin, requireUser, parseBody, json, CORS } from './_utils.js'
 
+// Give the function room to finish the base64 decode + Storage upload +
+// DB writes. The default 10s Vercel Hobby limit was cutting off just
+// after the Storage write, so the order DID flip to pending_admin_review
+// but the client saw an error and displayed "Upload failed".
+export const config = { maxDuration: 60 }
+
 // Seller-only. Accepts a base64-encoded QR / PDF / image, stores it in
 // the private `order-tickets` Storage bucket keyed by order_id, writes
 // the internal path onto orders.ticket_file_url, and transitions the
