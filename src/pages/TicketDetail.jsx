@@ -33,6 +33,7 @@ export default function TicketDetail() {
   const [fileUrl, setFileUrl]         = useState(null)
   const [fileLoading, setFileLoading] = useState(false)
   const [uploadLoading, setUploadLoading] = useState(false)
+  const [connectLoading, setConnectLoading] = useState(false)
   const [msg, setMsg]                 = useState('')
   const [error, setError]             = useState('')
 
@@ -421,6 +422,25 @@ export default function TicketDetail() {
     loadOrders(ticket, user)
   }
 
+  async function handleConnectStripe() {
+    setConnectLoading(true)
+    setError('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) { setError('You must be logged in to connect Stripe.'); setConnectLoading(false); return }
+      const res = await fetch('/api/stripe-connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      })
+      const data = await res.json()
+      if (data.url) { window.location.href = data.url; return }
+      setError(data.error || 'Failed to get Stripe onboarding URL.')
+    } catch {
+      setError('Network error connecting to Stripe.')
+    }
+    setConnectLoading(false)
+  }
+
   if (loading) return <div className="page-loading">Loading…</div>
   if (!ticket) return null
 
@@ -491,7 +511,18 @@ export default function TicketDetail() {
             <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>🛡 Waiting for admin approval</span>
           )}
           {isMySellerOrder && activeOrder.status === 'pending_admin_review' && (
-            <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>🛡 Ticket under review</span>
+            seller && !seller.stripe_account_id ? (
+              <>
+                <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>
+                  ⚠ Connect your payout account so the admin can approve your ticket and release your money
+                </span>
+                <button className="btn btn-connect btn-sm" onClick={handleConnectStripe} disabled={connectLoading}>
+                  {connectLoading ? 'Redirecting…' : '💳 Connect payout account'}
+                </button>
+              </>
+            ) : (
+              <span style={{ fontSize: '.8rem', color: 'var(--warning)', fontWeight: 600 }}>🛡 Ticket under review</span>
+            )
           )}
 
           {/* completed ───────────────────────────────────────────── */}

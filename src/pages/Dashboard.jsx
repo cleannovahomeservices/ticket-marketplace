@@ -199,7 +199,13 @@ export default function Dashboard() {
                     {order.status === 'pending_seller'       && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>📩 Offer — respond</span>}
                     {order.status === 'pending_payment'      && <span style={{ color: 'var(--accent2)', fontWeight: 600, fontSize: '.85rem' }}>💳 Awaiting payment</span>}
                     {order.status === 'paid_pending_ticket'  && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>📤 Upload ticket</span>}
-                    {order.status === 'pending_admin_review' && <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 Ticket under review</span>}
+                    {order.status === 'pending_admin_review' && (
+                      profile && !profile.stripe_account_id ? (
+                        <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>⚠ Connect payout account to get approved</span>
+                      ) : (
+                        <span style={{ color: 'var(--warning)', fontWeight: 600, fontSize: '.85rem' }}>🛡 Ticket under review</span>
+                      )
+                    )}
                     {order.status === 'completed'            && <span style={{ color: 'var(--success)', fontWeight: 600, fontSize: '.85rem' }}>✓ Completed</span>}
                     <Link to={`/ticket/${order.ticket_id}`} className="btn btn-primary btn-sm">Open chat</Link>
                   </div>
