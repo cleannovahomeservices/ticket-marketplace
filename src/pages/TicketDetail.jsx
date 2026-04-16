@@ -195,6 +195,23 @@ export default function TicketDetail() {
   async function createOrder(type, price) {
     if (!user) { navigate('/login'); return }
     setActionLoading(true); setError('')
+
+    // Re-query the DB for an existing pending order from this buyer on
+    // this ticket. Used as a fallback when the fetch throws mid-flight
+    // (Vercel cold start / network blip) but the server-side insert may
+    // have still succeeded. Avoids falsely alarming the user.
+    const findExisting = async () => {
+      const { data } = await supabase
+        .from('orders').select('*')
+        .eq('ticket_id', ticket.id)
+        .eq('buyer_id', user.id)
+        .in('status', ['pending_seller', 'pending_payment'])
+        .maybeSingle()
+      return data || null
+    }
+
+    let order = null
+    let serverError = null
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) { setError('You must be logged in.'); setActionLoading(false); return }
@@ -203,13 +220,24 @@ export default function TicketDetail() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({ ticket_id: ticket.id, type, price }),
       })
-      const data = await res.json()
-      if (!res.ok) { setError(data.error || 'Failed to create order'); setActionLoading(false); return }
-      // Server inserted the initial message; no need to send another.
-      setMyOrder(data.order)
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.order) {
+        order = data.order
+      } else {
+        serverError = data.error || 'Failed to create order'
+      }
+    } catch {
+      // Network threw — the server MAY have created the order. Fall
+      // through to the existence check before showing an error.
+    }
+
+    if (!order) order = await findExisting()
+
+    if (order) {
+      setMyOrder(order)
       setMsg(type === 'buy' ? 'Buy request sent. Waiting for seller response.' : 'Offer sent.')
-    } catch (err) {
-      setError('Network error creating order.')
+    } else if (serverError) {
+      setError(serverError)
     }
     setActionLoading(false)
   }
@@ -269,7 +297,13 @@ export default function TicketDetail() {
       return false
     }
 
-    let res, data
+    // Snapshot the current order status so that, on a network blip, we
+    // can re-query and tell whether the server-side action actually
+    // landed (status changed) — avoids showing a scary error when the
+    // action succeeded but the HTTP response got lost.
+    const prevStatus = (await supabase.from('orders').select('status').eq('id', order_id).maybeSingle()).data?.status || null
+
+    let res, data, threw = false
     try {
       res = await fetch(`/api/${endpoint}`, {
         method: 'POST',
@@ -277,14 +311,24 @@ export default function TicketDetail() {
         body: JSON.stringify({ order_id }),
       })
       data = await res.json().catch(() => ({}))
-    } catch (err) {
-      setActionLoading(false); setError(`Network error: ${err.message}`); return false
+    } catch {
+      threw = true
+    }
+
+    if (threw) {
+      // Did the server actually change the order anyway?
+      const { data: now } = await supabase.from('orders').select('status').eq('id', order_id).maybeSingle()
+      if (now?.status && now.status !== prevStatus) {
+        await loadOrders(ticket, user)
+        setActionLoading(false)
+        return true
+      }
+      setActionLoading(false); setError('Connection issue — please try again.'); return false
     }
 
     setActionLoading(false)
 
     if (!res.ok) {
-      // Surface diagnostic info so "Unauthorized" stops being a black box.
       if (res.status === 401) {
         setError(`Unauthorized${data.reason ? ` (${data.reason})` : ''}. Try logging out and back in.`)
       } else if (data.code === 'stripe_not_connected') {
